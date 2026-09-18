@@ -30,7 +30,7 @@ An unavailable or ambiguous configured control stops the task.
 | `tasks/open_application.py` | Open/reuse an application through configured desktop, taskbar or search controls |
 | `tasks/browser.py` | Reuse/open the required browser tab, click the search field and type |
 | `profiles/windows_edge.json` | Environment-specific application and control selectors |
-| `inspect_ui.py` | Read-only target-PC window/control inspection |
+| `tools/inspect_ui.py` | Read-only target-PC window/control inspection |
 
 The old `core/process.py` direct launcher has been removed. Runtime actions
 never use `os.startfile()`, direct window restoration, `set_focus()`, or UIA
@@ -83,7 +83,7 @@ window, the task stops and reports the mismatch.
 On the actual deployment computer, run:
 
 ```powershell
-python inspect_ui.py --delay 5
+python tools/inspect_ui.py --delay 5
 ```
 
 During the delay, manually show the interface to inspect (desktop, search
@@ -93,7 +93,7 @@ Repeat after manually entering an application name into Windows Search
 to inspect its results. To inspect an already reported window explicitly:
 
 ```powershell
-python inspect_ui.py --handle 12345 --delay 0
+python tools/inspect_ui.py --handle 12345 --delay 0
 ```
 
 `12345` is only an example; use the handle from your own inspection output.
@@ -171,7 +171,7 @@ input to the expected foreground window; changing windows stops input.
 
 ```powershell
 python -m unittest discover -s tests -v
-python -m compileall -q core tasks main.py inspect_ui.py
+python -m compileall -q core tasks tools main.py
 ```
 
 Automated tests use fake observations/actions to test decisions and state
