@@ -1,0 +1,3 @@
+pyautogui
+pywinauto
+pywin32

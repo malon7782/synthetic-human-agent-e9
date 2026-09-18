@@ -1,0 +1,27 @@
+{
+  "description": "English Windows/Edge example. Taskbar and browser selectors were observed on the development PC; inspect the deployment PC before relying on them. Desktop shortcut and Windows Search selectors are intentionally unset because their target controls have not been inspected.",
+  "minimize_selector": {
+    "title": "Minimize",
+    "control_type": "Button"
+  },
+  "application": {
+    "id": "edge",
+    "title_re": ".*Microsoft\u200b? Edge$",
+    "desktop_selector": null,
+    "taskbar_selector": {
+      "auto_id": "Appid: MSEdge",
+      "control_type": "Button"
+    },
+    "search": null
+  },
+  "browser": {
+    "search_box": {
+      "auto_id": "q",
+      "control_type": "Edit"
+    },
+    "ready_tab": {
+      "title_re": "New tab(?: - .*)?",
+      "control_type": "TabItem"
+    }
+  }
+}
