@@ -5,14 +5,16 @@ class BrowserTask:
         self.timing = timing
 
     def run(self):
+        self.ui.fetch_desktop()
 
-        # run a certain app
+
+        x, y = self.ui.get_coords_desktop("Microsoft Edge")
+
+        print(x, y)
+        # move_and_click()...?
+
         self.process.launch("msedge.exe")
         
 
         self.timing.pause()
-        
-
-        x, y = self.ui.get_coords("search_box")        # not implemented yet
-        self.ui.move_and_click(x, y)                
-        self.ui.type_text("NTU Hackathon")
+ 
