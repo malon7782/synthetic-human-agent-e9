@@ -21,8 +21,9 @@ class UI:
     def __init__(self, timing, rng=None):
         self.timing = timing
         self.rng = rng if rng is not None else random.Random()
+        self.desktop_icons = {}
 
-    def get_coords(self, element_id=None):
+    def fetch_desktop(self):
         # Locate the desktop icon list
         desktop = Desktop(backend="uia")
         icon_list = desktop.window(
@@ -37,15 +38,11 @@ class UI:
             handle=icon_list.handle
         ).wrapper_object()
 
-        results = []
+        icons = {}
 
         for index in range(list_view.item_count()):
             item = list_view.get_item(index)
             name = item.text()
-
-            # Skip items that do not match the requested name
-            if element_id is not None and name != element_id:
-                continue
 
             # convert the icon bounds to screen coordinates
             rect = item.rectangle(area="icon")
@@ -56,16 +53,18 @@ class UI:
                 (rect.right, rect.bottom)
             )
 
-            # Sample a point inside the icon bounds
-            x = sample_axis(left, right, self.rng)
-            y = sample_axis(top, bottom, self.rng)
+            # Cache the bounds, without sampling a point yet
+            icons[name] = (left, top, right, bottom)
 
-            results.append({
-                "name": name,
-                "coords": (x, y),
-                "icon_rect": (left, top, right, bottom),
-            })
-        return results
+        self.desktop_icons = icons
+
+    def get_coords_desktop(self, element_id):
+        left, top, right, bottom = self.desktop_icons[element_id]
+
+        x = sample_axis(left, right, self.rng)
+        y = sample_axis(top, bottom, self.rng)
+
+        return x, y
 
     def move_and_click(self, x, y):
         # this part of logic should be *extremly important*
@@ -88,31 +87,3 @@ class UI:
             # thinking now and then... perhaps we need to simulate
             # that, too.
             print(f"typing: {char}")
-
-# get_coor_test, random return 10 coords from desktop
-
-
-if __name__ == "__main__":
-    import time
-    from pywinauto import mouse
-
-    ui = UI(timing=None)
-
-    print("Show the desktop within 3 seconds.")
-    time.sleep(3)
-
-    icons = ui.get_coords()
-
-    if not icons:
-        print("No desktop items found.")
-    else:
-        previous = None
-
-        for _ in range(10):
-            candidates = [icon for icon in icons if icon is not previous]
-            icon = random.choice(candidates or icons)
-
-            print(icon["name"], icon["coords"])
-            mouse.move(coords=icon["coords"])
-            previous = icon
-            time.sleep(3)
