@@ -1,3 +1,6 @@
+import pyautogui
+
+
 class UI:
     def __init__(self, timing):
         self.timing = timing
@@ -7,15 +10,30 @@ class UI:
         # NEEDSWORK: what mechanism will we be using?
         return (500, 500)
 
-    def move_and_click(self, x, y):
-        # this part of logic should be *extremly important*
-        # since bypassing process monitor isn't that hard, but making
-        # mouse movement look like human behavior is.
+    def move_and_click(self, x, y, button="left", end_x=None, end_y=None, scroll=0):
+        # button: left, double, drag, scroll, middle, right.
+        # For drag, (x, y) is the start and (end_x, end_y) is the end.
+        # For scroll, positive values scroll up and negative values scroll down.
+        if button not in ("left", "double", "drag", "scroll", "middle", "right"):
+            raise ValueError("button must be left, double, drag, scroll, middle, or right")
+        if button == "drag" and (end_x is None or end_y is None):
+            raise ValueError("drag requires end_x and end_y")
 
-        # NEEDSWORK:
-        # 1. cursor should move along a curve..?
         self.timing.delay()
-        print(f"move and click: ({x}, {y})")
+        pyautogui.moveTo(x, y, duration=0.3)
+
+        if button == "double":
+            pyautogui.doubleClick(interval=0.1, button="left")
+        elif button == "drag":
+            pyautogui.mouseDown(button="left")
+            try:
+                pyautogui.moveTo(end_x, end_y, duration=0.3)
+            finally:
+                pyautogui.mouseUp(button="left")
+        elif button == "scroll":
+            pyautogui.scroll(scroll)
+        else:
+            pyautogui.click(button=button)
 
     def type_text(self, text):
         for char in text:
