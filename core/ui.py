@@ -77,7 +77,7 @@ class UI:
         # button: left, double, drag, scroll, middle, right.
         # For drag, (x, y) is the start and (end_x, end_y) is the end.
         # For scroll, positive values scroll up and negative values scroll down.
-        if button not in ("left", "double", "drag", "scroll", "middle", "right"):
+        if button not in ("left", "double", "drag", "scroll", "middle", "right", "move"):
             raise ValueError("button must be left, double, drag, scroll, middle, or right")
         if button == "drag" and (end_x is None or end_y is None):
             raise ValueError("drag requires end_x and end_y")
@@ -95,6 +95,8 @@ class UI:
                 pyautogui.mouseUp(button="left")
         elif button == "scroll":
             pyautogui.scroll(scroll)
+        elif button == "move":
+            pass
         else:
             pyautogui.click(button=button)
 
@@ -125,12 +127,3 @@ class UI:
         # name of the Desktop should be either Program or WorkerW
         return name.value in ("Progman", "WorkerW")
 
-    def press_hotkey(self, *keys):
-        # e.g. press_hotkey('win', 'd') to show desktop
-        vks = [VK_MAP[k] for k in keys]
-        for vk in vks:
-            ctypes.windll.user32.keybd_event(vk, 0, 0, 0)
-        for vk in reversed(vks):
-            # release
-            ctypes.windll.user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
-        self.timing.delay()
