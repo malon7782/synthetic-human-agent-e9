@@ -100,7 +100,7 @@ class UI:
                 (start[0] + end[0]) / 2 + normal_x * bend,
                 (start[1] + end[1]) / 2 + normal_y * bend,
             )
-            steps = max(5, min(12, round(distance / 80)))
+            steps = max(12, min(30, round(distance / 25)))
             return [
                 (
                     (1 - t) ** 2 * start[0]
@@ -114,22 +114,27 @@ class UI:
             ]
 
         def move_points(points):
-            # Reuse the project's shared timing policy between independent
-            # movement segments instead of maintaining another delay source.
-            self.timing.delay()
             point_count = len(points)
-            for index, point in enumerate(points, start=1):
-                # The middle of a path is faster than its beginning and end.
-                progress = index / point_count
-                speed = 0.45 + 0.55 * math.sin(math.pi * progress)
-                duration = self.rng.uniform(0.10, 0.16) / speed
-                point_x, point_y = clamp(round(point[0]), round(point[1]))
-                pyautogui.moveTo(point_x, point_y, duration=duration)
+            original_pause = pyautogui.PAUSE
+            try:
+                # PyAutoGUI normally waits after every public call.  Curve
+                # points use the short timing policy below instead.
+                pyautogui.PAUSE = 0
+                for index, point in enumerate(points, start=1):
+                    progress = index / point_count
+                    point_x, point_y = clamp(round(point[0]), round(point[1]))
+                    pyautogui.moveTo(point_x, point_y, duration=0)
+                    self.timing.curve_step_delay(progress)
+            finally:
+                pyautogui.PAUSE = original_pause
 
         current = pyautogui.position()
         start = (current.x, current.y)
 
         if x is not None:
+            if math.hypot(x - start[0], y - start[1]) < 3:
+                return
+
             # Use the shorter screen dimension so the circular area stays a
             # 5% radius regardless of aspect ratio.
             radius = 0.05 * min(screen_width, screen_height)
@@ -141,9 +146,52 @@ class UI:
             )
 
             move_points(curve_points(start, approach, bend_ratio=0.04))
+            self.timing.correction_pause()
             # The final, shorter leg uses less curvature and lands exactly on
             # the supplied target before the caller performs any action.
             move_points(curve_points(approach, (x, y), bend_ratio=0.02))
+            return
+
+        idle_mode = self.rng.choices(
+            ("wreath", "walk", "zigzag"),
+            weights=(2, 7, 1),
+            k=1,
+        )[0]
+        if idle_mode == "zigzag":
+            horizontal = self.rng.choice((True, False))
+            round_trips = self.rng.randint(3, 5)
+            # Use 15%-85% of the primary screen axis: one sweep spans 70% of
+            # the display.  Alternating the other axis makes the path visible
+            # as a zigzag rather than repeatedly tracing one straight line.
+            if horizontal:
+                near_edge, far_edge = screen_width * 0.15, screen_width * 0.85
+                base = start[1]
+                offset = min(screen_height * 0.04, 45)
+                points = [
+                    clamp(
+                        far_edge if index % 2 == 0 else near_edge,
+                        base + (offset if index % 2 == 0 else -offset),
+                    )
+                    for index in range(round_trips * 2)
+                ]
+            else:
+                near_edge, far_edge = screen_height * 0.15, screen_height * 0.85
+                base = start[0]
+                offset = min(screen_width * 0.04, 45)
+                points = [
+                    clamp(
+                        base + (offset if index % 2 == 0 else -offset),
+                        far_edge if index % 2 == 0 else near_edge,
+                    )
+                    for index in range(round_trips * 2)
+                ]
+
+            self.timing.delay()
+            for point_x, point_y in points:
+                pyautogui.moveTo(
+                    round(point_x), round(point_y),
+                    duration=self.rng.uniform(0.12, 0.20),
+                )
             return
 
         safe_radius = min(
@@ -152,7 +200,7 @@ class UI:
             screen_width - 1 - start[0],
             screen_height - 1 - start[1],
         )
-        if safe_radius >= 12 and self.rng.choice((True, False)):
+        if idle_mode == "wreath" and safe_radius >= 12:
             # A small flower-like loop centered at the current cursor.
             petals = self.rng.choice((4, 5, 6))
             points = []
@@ -192,7 +240,7 @@ class UI:
             raise ValueError("drag requires end_x and end_y")
 
         self.timing.delay()
-        pyautogui.moveTo(x, y, duration=0.3)
+        self.curve_move(x, y)
 
         if button == "double":
             pyautogui.doubleClick(interval=0.1, button="left")
