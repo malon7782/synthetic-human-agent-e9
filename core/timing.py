@@ -5,7 +5,7 @@ class Timing:
     def pause(self):
         # pause for 2 ~ 5 seconds
         # to simulate 'thinking' behavior
-        time.sleep(random.uniform(2.0, 5.0))
+        time.sleep(random.uniform(1.0, 3.0))
         
     def delay(self):
         # shorter pause = delay

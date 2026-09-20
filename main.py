@@ -5,7 +5,7 @@ from core.ui import UI
 from tasks.browser import BrowserTask
 from tasks.default import DefaultTask
 
-
+676
 
 def main():
     timing = Timing()
@@ -19,13 +19,16 @@ def main():
         'browser': BrowserTask(process, ui, timing)
     }
 
-    while True:
+    count = 0
+
+    while count < 3:
         # set everything to the default status
         default_task.run()
         # randomly select a task
         task_list[random.choice(list(task_list.keys()))].run()
         timing.pause()
         print("done.")
+        count += 1
 
 if __name__ == "__main__":
     main()
