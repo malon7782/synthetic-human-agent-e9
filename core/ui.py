@@ -1,3 +1,4 @@
+import math
 import random
 import ctypes
 import pyautogui
@@ -73,6 +74,114 @@ class UI:
 
         return x, y
 
+    def curve_move(self, x=None, y=None):
+        """Move without clicking, either toward a target or as an idle motion."""
+        if (x is None) != (y is None):
+            raise ValueError("x and y must both be coordinates or both be None")
+
+        screen_width, screen_height = pyautogui.size()
+
+        def clamp(point_x, point_y):
+            return (
+                max(0, min(screen_width - 1, point_x)),
+                max(0, min(screen_height - 1, point_y)),
+            )
+
+        def curve_points(start, end, bend_ratio):
+            dx, dy = end[0] - start[0], end[1] - start[1]
+            distance = math.hypot(dx, dy)
+            if distance < 2:
+                return [end]
+
+            # A perpendicular offset creates a shallow quadratic Bezier arc.
+            normal_x, normal_y = -dy / distance, dx / distance
+            bend = self.rng.uniform(-bend_ratio, bend_ratio) * distance
+            control = (
+                (start[0] + end[0]) / 2 + normal_x * bend,
+                (start[1] + end[1]) / 2 + normal_y * bend,
+            )
+            steps = max(5, min(12, round(distance / 80)))
+            return [
+                (
+                    (1 - t) ** 2 * start[0]
+                    + 2 * (1 - t) * t * control[0]
+                    + t ** 2 * end[0],
+                    (1 - t) ** 2 * start[1]
+                    + 2 * (1 - t) * t * control[1]
+                    + t ** 2 * end[1],
+                )
+                for t in (index / steps for index in range(1, steps + 1))
+            ]
+
+        def move_points(points):
+            # Reuse the project's shared timing policy between independent
+            # movement segments instead of maintaining another delay source.
+            self.timing.delay()
+            point_count = len(points)
+            for index, point in enumerate(points, start=1):
+                # The middle of a path is faster than its beginning and end.
+                progress = index / point_count
+                speed = 0.45 + 0.55 * math.sin(math.pi * progress)
+                duration = self.rng.uniform(0.10, 0.16) / speed
+                point_x, point_y = clamp(round(point[0]), round(point[1]))
+                pyautogui.moveTo(point_x, point_y, duration=duration)
+
+        current = pyautogui.position()
+        start = (current.x, current.y)
+
+        if x is not None:
+            # Use the shorter screen dimension so the circular area stays a
+            # 5% radius regardless of aspect ratio.
+            radius = 0.05 * min(screen_width, screen_height)
+            angle = self.rng.uniform(0, 2 * math.pi)
+            distance = radius * math.sqrt(self.rng.random())
+            approach = clamp(
+                x + distance * math.cos(angle),
+                y + distance * math.sin(angle),
+            )
+
+            move_points(curve_points(start, approach, bend_ratio=0.04))
+            # The final, shorter leg uses less curvature and lands exactly on
+            # the supplied target before the caller performs any action.
+            move_points(curve_points(approach, (x, y), bend_ratio=0.02))
+            return
+
+        safe_radius = min(
+            0.05 * min(screen_width, screen_height),
+            start[0], start[1],
+            screen_width - 1 - start[0],
+            screen_height - 1 - start[1],
+        )
+        if safe_radius >= 12 and self.rng.choice((True, False)):
+            # A small flower-like loop centered at the current cursor.
+            petals = self.rng.choice((4, 5, 6))
+            points = []
+            for index in range(1, petals * 8 + 1):
+                angle = 2 * math.pi * index / (petals * 8)
+                loop_radius = safe_radius * (0.70 + 0.30 * math.sin(petals * angle))
+                points.append((
+                    start[0] + loop_radius * math.cos(angle),
+                    start[1] + loop_radius * math.sin(angle),
+                ))
+            move_points(points)
+            return
+
+        # Otherwise make a few local curved moves and never click.
+        walk_radius = max(12, safe_radius)
+        position = start
+        for _ in range(self.rng.randint(2, 4)):
+            angle = self.rng.uniform(0, 2 * math.pi)
+            distance = walk_radius * math.sqrt(self.rng.random())
+            destination = clamp(
+                start[0] + distance * math.cos(angle),
+                start[1] + distance * math.sin(angle),
+            )
+            move_points(curve_points(position, destination, bend_ratio=0.05))
+            position = destination
+
+
+
+        
     def move_and_click(self, x, y, button="left", end_x=None, end_y=None, scroll=0):
         # button: left, double, drag, scroll, middle, right.
         # For drag, (x, y) is the start and (end_x, end_y) is the end.

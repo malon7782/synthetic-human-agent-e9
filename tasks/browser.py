@@ -25,4 +25,4 @@ class BrowserTask:
         pyautogui.press('enter')
         self.timing.delay()
 
-        self.ui.move_and_click(x, y, "scroll", 400)
+        self.ui.move_and_click(x, y, "scroll", None, None, -50)
