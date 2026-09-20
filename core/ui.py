@@ -74,7 +74,7 @@ class UI:
 
         return x, y
 
-    def curve_move(self, x=None, y=None):
+    def curve_move(self, x=None, y=None, correction=True):
         """Move without clicking, either toward a target or as an idle motion."""
         if (x is None) != (y is None):
             raise ValueError("x and y must both be coordinates or both be None")
@@ -133,6 +133,15 @@ class UI:
 
         if x is not None:
             if math.hypot(x - start[0], y - start[1]) < 3:
+                return
+
+            if not correction:
+                target = clamp(x, y)
+                move_points(curve_points(
+                    start,
+                    target,
+                    bend_ratio=self.rng.uniform(0.015, 0.055),
+                ))
                 return
 
             # Use the shorter screen dimension so the circular area stays a

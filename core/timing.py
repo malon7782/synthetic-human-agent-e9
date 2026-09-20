@@ -24,3 +24,10 @@ class Timing:
     def correction_pause(self):
         """Pause briefly before correcting an intentionally inaccurate move."""
         time.sleep(random.uniform(0.1, 0.3))
+
+    def play_pause(self):
+        """Pause between bursts of non-targeted desktop mouse activity."""
+        if random.random() < 0.75:
+            time.sleep(random.uniform(0.10, 0.30))
+        else:
+            time.sleep(random.uniform(0.35, 0.65))
