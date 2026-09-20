@@ -1,7 +1,7 @@
-
 import random
-from pywinauto import Desktop
 import ctypes
+import pyautogui
+from pywinauto import Desktop
 
 VK_MAP = {'win': 0x5B, 'ctrl': 0x11, 'alt': 0x12, 'shift': 0x10,
           'esc': 0x1B, 'enter': 0x0D, 'tab': 0x09}
@@ -73,27 +73,50 @@ class UI:
 
         return x, y
 
-    def move_and_click(self, x, y):
-        # this part of logic should be *extremly important*
-        # since bypassing process monitor isn't that hard, but making
-        # mouse movement look like human behavior is.
+    def move_and_click(self, x, y, button="left", end_x=None, end_y=None, scroll=0):
+        # button: left, double, drag, scroll, middle, right.
+        # For drag, (x, y) is the start and (end_x, end_y) is the end.
+        # For scroll, positive values scroll up and negative values scroll down.
+        if button not in ("left", "double", "drag", "scroll", "middle", "right"):
+            raise ValueError("button must be left, double, drag, scroll, middle, or right")
+        if button == "drag" and (end_x is None or end_y is None):
+            raise ValueError("drag requires end_x and end_y")
 
-        # NEEDSWORK:
-        # 1. cursor should move along a curve..?
         self.timing.delay()
-        print(f"move and click: ({x}, {y})")
+        pyautogui.moveTo(x, y, duration=0.3)
+
+        if button == "double":
+            pyautogui.doubleClick(interval=0.1, button="left")
+        elif button == "drag":
+            pyautogui.mouseDown(button="left")
+            try:
+                pyautogui.moveTo(end_x, end_y, duration=0.3)
+            finally:
+                pyautogui.mouseUp(button="left")
+        elif button == "scroll":
+            pyautogui.scroll(scroll)
+        else:
+            pyautogui.click(button=button)
 
     def type_text(self, text):
+        user32 = ctypes.windll.user32
+        user32.GetForegroundWindow.restype = ctypes.c_void_p
+        user32.GetKeyboardLayout.restype = ctypes.c_void_p
+        window = user32.GetForegroundWindow()
+        thread = user32.GetWindowThreadProcessId(ctypes.c_void_p(window), None)
+
+        # Check English (0x09); Win+Space cycles through installed input languages.
+        for _ in range(user32.GetKeyboardLayoutList(0, None)):
+            if (user32.GetKeyboardLayout(thread) or 0) & 0x3FF == 0x09:
+                break
+            pyautogui.hotkey("win", "space")
+            pyautogui.sleep(0.3)
+        else:
+            raise RuntimeError("Could not switch to an English keyboard")
+
         for char in text:
             self.timing.delay()
-            # NEEDSWORK:
-            #
-            # 1. random typo?
-            #
-            # 2. it's common for we human to stop typing and start
-            # thinking now and then... perhaps we need to simulate
-            # that, too.
-            print(f"typing: {char}")
+            pyautogui.write(char)
 
     def is_on_desktop(self):
         hwnd = ctypes.windll.user32.GetForegroundWindow()
@@ -111,4 +134,3 @@ class UI:
             # release
             ctypes.windll.user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
         self.timing.delay()
-

@@ -7,14 +7,15 @@ class BrowserTask:
     def run(self):
         self.ui.fetch_desktop()
 
-
         x, y = self.ui.get_coords_desktop("Microsoft Edge")
 
-        print(x, y)
-        # move_and_click()...?
+        self.ui.move_and_click(x, y)
+
+        self.timing.delay()
 
         self.process.launch("msedge.exe")
         
+        self.timing.delay()
 
-        self.timing.pause()
+        self.ui.type_text("676767")
  
