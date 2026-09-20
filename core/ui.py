@@ -1,3 +1,5 @@
+import ctypes
+
 import pyautogui
 
 
@@ -36,13 +38,21 @@ class UI:
             pyautogui.click(button=button)
 
     def type_text(self, text):
+        user32 = ctypes.windll.user32
+        user32.GetForegroundWindow.restype = ctypes.c_void_p
+        user32.GetKeyboardLayout.restype = ctypes.c_void_p
+        window = user32.GetForegroundWindow()
+        thread = user32.GetWindowThreadProcessId(ctypes.c_void_p(window), None)
+
+        # Check English (0x09); Win+Space cycles through installed input languages.
+        for _ in range(user32.GetKeyboardLayoutList(0, None)):
+            if (user32.GetKeyboardLayout(thread) or 0) & 0x3FF == 0x09:
+                break
+            pyautogui.hotkey("win", "space")
+            pyautogui.sleep(0.3)
+        else:
+            raise RuntimeError("Could not switch to an English keyboard")
+
         for char in text:
             self.timing.delay()
-            # NEEDSWORK:
-            #
-            # 1. random typo?
-            #
-            # 2. it's common for we human to stop typing and start
-            # thinking now and then... perhaps we need to simulate
-            # that, too.
-            print(f"typing: {char}")
+            pyautogui.write(char)
