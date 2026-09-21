@@ -1,3 +1,5 @@
+import math
+
 import pyautogui
 
 
@@ -28,6 +30,36 @@ class PlayTask:
         # intentional miss-and-correct behavior used before real clicks.
         self.ui.curve_move(x, y, correction=False)
 
+    def _wreath_burst(self):
+        """Draw a small flower-shaped loop entirely inside the work area."""
+        screen_width, screen_height = pyautogui.size()
+        left, top, right, bottom = self._work_area(
+            screen_width, screen_height
+        )
+        radius = round(0.05 * min(screen_width, screen_height))
+        center_x = self.ui.rng.randint(left + radius, right - radius)
+        center_y = self.ui.rng.randint(top + radius, bottom - radius)
+        petals = self.ui.rng.choice((4, 5, 6))
+        point_count = petals * 8
+
+        # Start on the loop so the movement toward the play area is separate
+        # from the shape itself.
+        self._move_freely(center_x + radius, center_y)
+        original_pause = pyautogui.PAUSE
+        try:
+            pyautogui.PAUSE = 0
+            for index in range(1, point_count + 1):
+                angle = 2 * math.pi * index / point_count
+                loop_radius = radius * (
+                    0.70 + 0.30 * math.sin(petals * angle)
+                )
+                x = round(center_x + loop_radius * math.cos(angle))
+                y = round(center_y + loop_radius * math.sin(angle))
+                pyautogui.moveTo(x, y, duration=0)
+                self.timing.curve_step_delay(index / point_count)
+        finally:
+            pyautogui.PAUSE = original_pause
+
     def _free_wander_burst(self):
         """Make a sustained, high-amplitude sequence with irregular reversals."""
         screen_width, screen_height = pyautogui.size()
@@ -54,34 +86,39 @@ class PlayTask:
             if self.ui.rng.random() < 0.20:
                 self.timing.play_pause()
 
-    def _horizontal_sweep_burst(self):
-        """Sweep left and right with changing endpoints and vertical drift."""
+    def _axis_zigzag_burst(self):
+        """Make three to five fast horizontal or vertical round trips."""
         screen_width, screen_height = pyautogui.size()
-        _, top, _, bottom = self._work_area(screen_width, screen_height)
-        y = self.ui.rng.randint(top, bottom)
-        round_trips = self.ui.rng.randint(2, 4)
+        left, top, right, bottom = self._work_area(
+            screen_width, screen_height
+        )
+        horizontal = self.ui.rng.choice((True, False))
+        round_trips = self.ui.rng.randint(3, 5)
 
         for index in range(round_trips * 2):
-            if index % 2 == 0:
-                x = self.ui.rng.randint(
-                    round(screen_width * 0.78),
-                    round(screen_width * 0.95),
+            if horizontal:
+                x = right if index % 2 == 0 else left
+                base_y = (top + bottom) // 2
+                y = base_y + (
+                    round(screen_height * 0.04)
+                    if index % 2 == 0 else -round(screen_height * 0.04)
                 )
             else:
-                x = self.ui.rng.randint(
-                    round(screen_width * 0.05),
-                    round(screen_width * 0.22),
+                base_x = (left + right) // 2
+                x = base_x + (
+                    round(screen_width * 0.04)
+                    if index % 2 == 0 else -round(screen_width * 0.04)
                 )
-            y += self.ui.rng.randint(
-                -round(screen_height * 0.07),
-                round(screen_height * 0.07),
-            )
-            _, y = self._clamp_to_work_area(
+                y = bottom if index % 2 == 0 else top
+
+            x, y = self._clamp_to_work_area(
                 x, y, screen_width, screen_height
             )
-            self._move_freely(x, y)
-            if self.ui.rng.random() < 0.15:
-                self.timing.play_pause()
+            pyautogui.moveTo(
+                x,
+                y,
+                duration=self.ui.rng.uniform(0.12, 0.20),
+            )
 
     def _short_adjustment_burst(self):
         """Make one to three short relocations followed by a brief hold."""
@@ -174,10 +211,11 @@ class PlayTask:
         behaviors = (
             self._free_wander_burst,
             self._drag_selection_burst,
-            self._horizontal_sweep_burst,
+            self._axis_zigzag_burst,
             self._short_adjustment_burst,
+            self._wreath_burst,
         )
-        weights = (40, 30, 18, 12)
+        weights = (37, 28, 17, 10, 8)
 
         self.timing.play_pause()
         for index in range(self.ui.rng.randint(2, 4)):

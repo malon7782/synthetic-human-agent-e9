@@ -74,10 +74,10 @@ class UI:
 
         return x, y
 
-    def curve_move(self, x=None, y=None, correction=True):
-        """Move without clicking, either toward a target or as an idle motion."""
-        if (x is None) != (y is None):
-            raise ValueError("x and y must both be coordinates or both be None")
+    def curve_move(self, x, y, correction=True):
+        """Move toward the supplied screen coordinates without clicking."""
+        if x is None or y is None:
+            raise ValueError("curve_move requires both x and y coordinates")
 
         screen_width, screen_height = pyautogui.size()
 
@@ -131,114 +131,34 @@ class UI:
         current = pyautogui.position()
         start = (current.x, current.y)
 
-        if x is not None:
-            if math.hypot(x - start[0], y - start[1]) < 3:
-                return
-
-            if not correction:
-                target = clamp(x, y)
-                move_points(curve_points(
-                    start,
-                    target,
-                    bend_ratio=self.rng.uniform(0.015, 0.055),
-                ))
-                return
-
-            # Use the shorter screen dimension so the circular area stays a
-            # 5% radius regardless of aspect ratio.
-            radius = 0.05 * min(screen_width, screen_height)
-            angle = self.rng.uniform(0, 2 * math.pi)
-            distance = radius * math.sqrt(self.rng.random())
-            approach = clamp(
-                x + distance * math.cos(angle),
-                y + distance * math.sin(angle),
-            )
-
-            move_points(curve_points(start, approach, bend_ratio=0.04))
-            self.timing.correction_pause()
-            # The final, shorter leg uses less curvature and lands exactly on
-            # the supplied target before the caller performs any action.
-            move_points(curve_points(approach, (x, y), bend_ratio=0.02))
+        if math.hypot(x - start[0], y - start[1]) < 3:
             return
 
-        idle_mode = self.rng.choices(
-            ("wreath", "walk", "zigzag"),
-            weights=(2, 7, 1),
-            k=1,
-        )[0]
-        if idle_mode == "zigzag":
-            horizontal = self.rng.choice((True, False))
-            round_trips = self.rng.randint(3, 5)
-            # Use 15%-85% of the primary screen axis: one sweep spans 70% of
-            # the display.  Alternating the other axis makes the path visible
-            # as a zigzag rather than repeatedly tracing one straight line.
-            if horizontal:
-                near_edge, far_edge = screen_width * 0.15, screen_width * 0.85
-                base = start[1]
-                offset = min(screen_height * 0.04, 45)
-                points = [
-                    clamp(
-                        far_edge if index % 2 == 0 else near_edge,
-                        base + (offset if index % 2 == 0 else -offset),
-                    )
-                    for index in range(round_trips * 2)
-                ]
-            else:
-                near_edge, far_edge = screen_height * 0.15, screen_height * 0.85
-                base = start[0]
-                offset = min(screen_width * 0.04, 45)
-                points = [
-                    clamp(
-                        base + (offset if index % 2 == 0 else -offset),
-                        far_edge if index % 2 == 0 else near_edge,
-                    )
-                    for index in range(round_trips * 2)
-                ]
-
-            self.timing.delay()
-            for point_x, point_y in points:
-                pyautogui.moveTo(
-                    round(point_x), round(point_y),
-                    duration=self.rng.uniform(0.12, 0.20),
-                )
+        if not correction:
+            target = clamp(x, y)
+            move_points(curve_points(
+                start,
+                target,
+                bend_ratio=self.rng.uniform(0.015, 0.055),
+            ))
             return
 
-        safe_radius = min(
-            0.05 * min(screen_width, screen_height),
-            start[0], start[1],
-            screen_width - 1 - start[0],
-            screen_height - 1 - start[1],
+        # Use the shorter screen dimension so the circular area stays a
+        # 5% radius regardless of aspect ratio.
+        radius = 0.05 * min(screen_width, screen_height)
+        angle = self.rng.uniform(0, 2 * math.pi)
+        distance = radius * math.sqrt(self.rng.random())
+        approach = clamp(
+            x + distance * math.cos(angle),
+            y + distance * math.sin(angle),
         )
-        if idle_mode == "wreath" and safe_radius >= 12:
-            # A small flower-like loop centered at the current cursor.
-            petals = self.rng.choice((4, 5, 6))
-            points = []
-            for index in range(1, petals * 8 + 1):
-                angle = 2 * math.pi * index / (petals * 8)
-                loop_radius = safe_radius * (0.70 + 0.30 * math.sin(petals * angle))
-                points.append((
-                    start[0] + loop_radius * math.cos(angle),
-                    start[1] + loop_radius * math.sin(angle),
-                ))
-            move_points(points)
-            return
 
-        # Otherwise make a few local curved moves and never click.
-        walk_radius = max(12, safe_radius)
-        position = start
-        for _ in range(self.rng.randint(2, 4)):
-            angle = self.rng.uniform(0, 2 * math.pi)
-            distance = walk_radius * math.sqrt(self.rng.random())
-            destination = clamp(
-                start[0] + distance * math.cos(angle),
-                start[1] + distance * math.sin(angle),
-            )
-            move_points(curve_points(position, destination, bend_ratio=0.05))
-            position = destination
+        move_points(curve_points(start, approach, bend_ratio=0.04))
+        self.timing.correction_pause()
+        # The final, shorter leg uses less curvature and lands exactly on
+        # the supplied target before the caller performs any action.
+        move_points(curve_points(approach, (x, y), bend_ratio=0.02))
 
-
-
-        
     def move_and_click(self, x, y, button="left", end_x=None, end_y=None, scroll=0):
         # button: left, double, drag, scroll, middle, right.
         # For drag, (x, y) is the start and (end_x, end_y) is the end.
