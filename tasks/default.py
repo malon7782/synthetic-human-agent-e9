@@ -9,6 +9,7 @@ class DefaultTask:
     def run(self):
         if not self.ui.is_on_desktop():
             pyautogui.hotkey('win', 'd')
+            # self.ui.press_hotkey()
             self.timing.delay()
 
         # this doesn't deserve a standalone api...

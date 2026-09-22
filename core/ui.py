@@ -1,3 +1,4 @@
+import math
 import random
 import ctypes
 import pyautogui
@@ -73,6 +74,91 @@ class UI:
 
         return x, y
 
+    def curve_move(self, x, y, correction=True):
+        """Move toward the supplied screen coordinates without clicking."""
+        if x is None or y is None:
+            raise ValueError("curve_move requires both x and y coordinates")
+
+        screen_width, screen_height = pyautogui.size()
+
+        def clamp(point_x, point_y):
+            return (
+                max(0, min(screen_width - 1, point_x)),
+                max(0, min(screen_height - 1, point_y)),
+            )
+
+        def curve_points(start, end, bend_ratio):
+            dx, dy = end[0] - start[0], end[1] - start[1]
+            distance = math.hypot(dx, dy)
+            if distance < 2:
+                return [end]
+
+            # A perpendicular offset creates a shallow quadratic Bezier arc.
+            normal_x, normal_y = -dy / distance, dx / distance
+            bend = self.rng.uniform(-bend_ratio, bend_ratio) * distance
+            control = (
+                (start[0] + end[0]) / 2 + normal_x * bend,
+                (start[1] + end[1]) / 2 + normal_y * bend,
+            )
+            steps = max(12, min(30, round(distance / 25)))
+            return [
+                (
+                    (1 - t) ** 2 * start[0]
+                    + 2 * (1 - t) * t * control[0]
+                    + t ** 2 * end[0],
+                    (1 - t) ** 2 * start[1]
+                    + 2 * (1 - t) * t * control[1]
+                    + t ** 2 * end[1],
+                )
+                for t in (index / steps for index in range(1, steps + 1))
+            ]
+
+        def move_points(points):
+            point_count = len(points)
+            original_pause = pyautogui.PAUSE
+            try:
+                # PyAutoGUI normally waits after every public call.  Curve
+                # points use the short timing policy below instead.
+                pyautogui.PAUSE = 0
+                for index, point in enumerate(points, start=1):
+                    progress = index / point_count
+                    point_x, point_y = clamp(round(point[0]), round(point[1]))
+                    pyautogui.moveTo(point_x, point_y, duration=0)
+                    self.timing.curve_step_delay(progress)
+            finally:
+                pyautogui.PAUSE = original_pause
+
+        current = pyautogui.position()
+        start = (current.x, current.y)
+
+        if math.hypot(x - start[0], y - start[1]) < 3:
+            return
+
+        if not correction:
+            target = clamp(x, y)
+            move_points(curve_points(
+                start,
+                target,
+                bend_ratio=self.rng.uniform(0.015, 0.055),
+            ))
+            return
+
+        # Use the shorter screen dimension so the circular area stays a
+        # 5% radius regardless of aspect ratio.
+        radius = 0.05 * min(screen_width, screen_height)
+        angle = self.rng.uniform(0, 2 * math.pi)
+        distance = radius * math.sqrt(self.rng.random())
+        approach = clamp(
+            x + distance * math.cos(angle),
+            y + distance * math.sin(angle),
+        )
+
+        move_points(curve_points(start, approach, bend_ratio=0.04))
+        self.timing.correction_pause()
+        # The final, shorter leg uses less curvature and lands exactly on
+        # the supplied target before the caller performs any action.
+        move_points(curve_points(approach, (x, y), bend_ratio=0.02))
+
     def move_and_click(self, x, y, button="left", end_x=None, end_y=None, scroll=0):
         # button: left, double, drag, scroll, middle, right.
         # For drag, (x, y) is the start and (end_x, end_y) is the end.
@@ -83,7 +169,7 @@ class UI:
             raise ValueError("drag requires end_x and end_y")
 
         self.timing.delay()
-        pyautogui.moveTo(x, y, duration=0.3)
+        self.curve_move(x, y)
 
         if button == "double":
             pyautogui.doubleClick(interval=0.1, button="left")
