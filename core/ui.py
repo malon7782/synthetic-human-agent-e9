@@ -2,6 +2,7 @@ import math
 import random
 import ctypes
 import pyautogui
+import time
 from pywinauto import Desktop
 
 VK_MAP = {'win': 0x5B, 'ctrl': 0x11, 'alt': 0x12, 'shift': 0x10,
@@ -80,6 +81,17 @@ class UI:
             raise ValueError("curve_move requires both x and y coordinates")
 
         screen_width, screen_height = pyautogui.size()
+
+        def curve_step_delay(self, progress):
+            """Pause briefly between curve points, with slower endpoints."""
+            if not 0 < progress <= 1:
+                raise ValueError("progress must be in (0, 1]")
+            speed = 0.45 + 0.55 * math.sin(math.pi * progress)
+            time.sleep(random.uniform(0.004, 0.008) / speed)
+
+        def correction_pause(self):
+            """Pause briefly before correcting an intentionally inaccurate move."""
+            time.sleep(random.uniform(0.1, 0.3))
 
         def clamp(point_x, point_y):
             return (
@@ -213,3 +225,16 @@ class UI:
         # name of the Desktop should be either Program or WorkerW
         return name.value in ("Progman", "WorkerW")
 
+    def center_of_desktop(self, range="mid"):
+        x = ctypes.windll.user32.GetSystemMetrics(0)
+        y = ctypes.windll.user32.GetSystemMetrics(1)
+        xLow, xHigh = 0.25 * x, 0.75 * x
+        yLow, yHigh = 0.25 * y, 0.75 * y
+        if range == "mid" :
+            return (0.5 * random.random() + 0.25)*x, (0.5 * random.random() + 0.25)*y
+
+    def press(self, *keys):
+        return pyautogui.press(list(keys))
+
+    def hotkey(self, *keys):
+        return pyautogui.hotkey(list(keys))

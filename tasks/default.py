@@ -12,9 +12,9 @@ class DefaultTask:
             # self.ui.press_hotkey()
             self.timing.delay()
 
-        # this doesn't deserve a standalone api...
-        # currently useless tho
-        x = ctypes.windll.user32.GetSystemMetrics(0) / 2
-        y = ctypes.windll.user32.GetSystemMetrics(1) / 2
+        x, y = self.ui.center_of_desktop()
+        self.ui.curve_move(x, y)
 
-        self.ui.move_and_click(x, y, "move")
+        x, y = self.ui.center_of_desktop()
+        self.ui.curve_move(x, y)
+
