@@ -10,7 +10,7 @@ class BrowserTask:
         self.ui.fetch_desktop()
 
         x, y = self.ui.get_coords_desktop("Microsoft Edge")
-        self.ui.move_and_click(x, y, "move")
+        self.ui.curve_move(x, y)
         self.timing.delay()
 
         self.ui.move_and_click(x, y, "double")
@@ -25,12 +25,9 @@ class BrowserTask:
         pyautogui.press('enter')
         self.timing.delay()
 
-<<<<<<< HEAD
         self.ui.move_and_click(x, y)
         self.ui.move_and_click(x, y, "scroll", None, None, -500)
         self.ui.move_and_click(x, y, "scroll", None, None, -500)
         self.ui.move_and_click(x, y, "scroll", None, None, -500)
         self.ui.move_and_click(x, y, "scroll", None, None, -500)
-=======
-        self.ui.move_and_click(x, y, "scroll", None, None, -50)
->>>>>>> origin/guxin1
+

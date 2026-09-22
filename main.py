@@ -4,9 +4,6 @@ from core.process import Process
 from core.ui import UI
 from tasks.browser import BrowserTask
 from tasks.default import DefaultTask
-from tasks.play import PlayTask
-
-676
 
 def main():
     timing = Timing()
@@ -18,7 +15,6 @@ def main():
     # registry of tasks
     task_list = {
         'browser': BrowserTask(process, ui, timing),
-        'play': PlayTask(ui, timing),
     }
 
     for count in range(2):
