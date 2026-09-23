@@ -1,5 +1,8 @@
-import pyautogui
+import os
 import re
+
+import pyautogui
+import pyperclip
 from pywinauto import Desktop
 
 
@@ -25,21 +28,14 @@ class HelloWorldTask:
 
         raise RuntimeError("Could not find a clear point on the desktop")
 
-    def _find_created_text_document(self):
-        names = tuple(self.ui.desktop_icons)
-        prefixes = ("new text document", "新建文本文档")
-        matches = [
-            name for name in names
-            if name.casefold().startswith(prefixes)
-        ]
-        if not matches:
-            return None
-        if len(matches) != 1:
+    def _find_new_desktop_item(self, previous_names):
+        new_names = set(self.ui.desktop_icons) - previous_names
+        if len(new_names) != 1:
             raise RuntimeError(
-                "Expected one text document on the desktop; "
-                f"matching names: {matches}; desktop items: {list(names)}"
+                "Expected exactly one new desktop item after creating a text document; "
+                f"new items: {sorted(new_names)}"
             )
-        return matches[0]
+        return new_names.pop()
 
     @staticmethod
     def _open_editor(document_name):
@@ -53,30 +49,73 @@ class HelloWorldTask:
                 f"The editor window for {document_name!r} did not appear"
             ) from error
 
+    def _run_with_powershell(self):
+        """Copy the script path from its context menu and run it in PowerShell."""
+        self.ui.fetch_desktop()
+        x, y = self.ui.get_coords_desktop("helloworld.py")
+        pyautogui.keyDown("shift")
+        try:
+            self.ui.move_and_click(x, y, "right")
+        finally:
+            pyautogui.keyUp("shift")
+        self.timing.pause()
+        self.ui.click_context_menu_item("Copy as path")
+        self.timing.pause()
+
+        script_path = pyperclip.paste().strip()
+        script_name = os.path.basename(script_path.strip('"')).casefold()
+        if script_name != "helloworld.py":
+            raise RuntimeError(
+                "Copy as path did not copy the expected helloworld.py file; "
+                f"clipboard contents: {script_path!r}"
+            )
+
+        self.timing.delay()
+        pyautogui.hotkey("win", "r")
+        self.timing.delay()
+        self.ui.type_text("powershell")
+        pyautogui.press("enter")
+
+        powershell = Desktop(backend="uia").window(title_re=".*PowerShell.*")
+        try:
+            powershell.wait("visible", timeout=15)
+            powershell.set_focus()
+        except Exception as error:
+            raise RuntimeError("The PowerShell window did not appear") from error
+
+        self.timing.pause()
+        self.ui.type_text("python ")
+        pyautogui.hotkey("ctrl", "v")
+        self.timing.pause()
+        pyautogui.press("enter")
+
     def run(self):
-        if not self.ui.is_on_desktop():
-            pyautogui.hotkey("win", "d")
-            self.timing.delay()
+        """Create and run the script after DefaultTask prepares the desktop."""
+        self.ui.fetch_desktop()
+        if any(
+            name.casefold() == "helloworld.py"
+            for name in self.ui.desktop_icons
+        ):
+            raise RuntimeError(
+                "helloworld.py already exists on the desktop; "
+                "move or rename it before running this task"
+            )
+
+        previous_names = set(self.ui.desktop_icons)
+        x, y = self._blank_desktop_point()
+
+        # Open the desktop context menu, then choose New > Text Document.
+        pyautogui.press("esc")
+        self.ui.move_and_click(x, y, "right")
+        self.timing.delay()
+        self.ui.click_context_menu_item("New")
+        self.timing.delay()
+        self.ui.click_context_menu_item("Text Document")
+        pyautogui.press("enter")
+        self.timing.delay()
 
         self.ui.fetch_desktop()
-        document_name = self._find_created_text_document()
-        if document_name is None:
-            x, y = self._blank_desktop_point()
-
-            # Open the desktop context menu, then choose New > Text Document.
-            pyautogui.press("esc")
-            self.ui.move_and_click(x, y, "right")
-            self.timing.delay()
-            self.ui.click_context_menu_item("New")
-            self.timing.delay()
-            self.ui.click_context_menu_item("Text Document")
-            pyautogui.press("enter")
-            self.timing.delay()
-
-            self.ui.fetch_desktop()
-            document_name = self._find_created_text_document()
-            if document_name is None:
-                raise RuntimeError("The new text document did not appear on the desktop")
+        document_name = self._find_new_desktop_item(previous_names)
 
         x, y = self.ui.get_coords_desktop(document_name)
         self.ui.move_and_click(x, y, "double")
@@ -99,6 +138,13 @@ class HelloWorldTask:
         self.ui.type_text("helloworld.py")
         pyautogui.press("enter")
         self.timing.delay()
-        pyautogui.press("enter")
-        
+        if not self.ui.is_on_desktop():
+            pyautogui.press("enter")
+            self.timing.delay()
 
+        self.ui.fetch_desktop()
+        if "helloworld.py" not in self.ui.desktop_icons:
+            raise RuntimeError(
+                "Renaming the new document to helloworld.py did not finish"
+            )
+        self._run_with_powershell()
