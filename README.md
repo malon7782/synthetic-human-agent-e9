@@ -46,7 +46,9 @@ of decoupling!)
 
 ### **main.py**
 
-Nothing surprising, it is just the main entrance of the agent. Once main.py is evoked,
-there will be a infinite loop randomly selecting and calling task functions. 
+`main.py` is the agent's entry point. In the current Hello World run, it calls
+`DefaultTask` to prepare the desktop and then runs `HelloWorldTask` once. The
+task sequence and examples for calling the UI helpers are documented in
+[docs/helloworld-task.md](docs/helloworld-task.md).
 
 
