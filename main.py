@@ -5,8 +5,8 @@ from core.ui import UI
 from tasks.browser import BrowserTask
 from tasks.default import DefaultTask
 from tasks.play import PlayTask
+from tasks.helloworld import HelloWorldTask
 
-676
 
 def main():
     timing = Timing()
@@ -19,9 +19,10 @@ def main():
     task_list = {
         'browser': BrowserTask(process, ui, timing),
         'play': PlayTask(ui, timing),
+        'python': HelloWorldTask(ui, timing)
     }
-
-    count = 0
+    
+    count = 2
 
     while count < 3:
         # set everything to the default status
