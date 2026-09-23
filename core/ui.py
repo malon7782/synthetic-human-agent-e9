@@ -94,9 +94,10 @@ class UI:
             time.sleep(random.uniform(0.1, 0.3))
 
         def clamp(point_x, point_y):
+            inset = 2
             return (
-                max(0, min(screen_width - 1, point_x)),
-                max(0, min(screen_height - 1, point_y)),
+                max(inset, min(screen_width - 1 - inset, point_x)),
+                max(inset, min(screen_height - 1 - inset, point_y)),
             )
 
         def curve_points(start, end, bend_ratio):
@@ -182,7 +183,7 @@ class UI:
 
         self.timing.delay()
         self.curve_move(x, y)
-
+        self.timing.delay()
         if button == "double":
             pyautogui.doubleClick(interval=0.1, button="left")
         elif button == "drag":
@@ -197,6 +198,96 @@ class UI:
             pass
         else:
             pyautogui.click(button=button)
+
+    def click_window_button(self, action):
+        """Click a title-bar button on the active window by action name."""
+        button_names = {
+            "minimize": ("Minimize", "最小化"),
+            "maximize": ("Maximize", "最大化"),
+            "restore": ("Restore", "还原"),
+            "close": ("Close", "关闭"),
+        }
+        try:
+            wanted = {name.casefold() for name in button_names[action.casefold()]}
+        except KeyError as error:
+            raise ValueError(f"Unsupported window action: {action}") from error
+        user32 = ctypes.windll.user32
+        user32.GetForegroundWindow.restype = ctypes.c_void_p
+        handle = user32.GetForegroundWindow()
+        window_spec = Desktop(backend="uia").window(handle=handle)
+        window = window_spec.wrapper_object()
+        window_rect = window.rectangle()
+        title_bars = window.descendants(control_type="TitleBar")
+        roots = title_bars + [window]
+        labels = []
+        matches = []
+        for root in roots:
+            for button in root.descendants(control_type="Button"):
+                try:
+                    if not button.is_visible():
+                        continue
+                    label = button.window_text().replace("&", "").strip().casefold()
+                    rect = button.rectangle()
+                    labels.append(f"{label}@({rect.left},{rect.top},{rect.right},{rect.bottom})")
+                    if (
+                        label in wanted
+                        and rect.top <= window_rect.top + 120
+                        and rect.right >= window_rect.right - 240
+                    ):
+                        matches.append((rect.right, button, rect))
+                except Exception:
+                    continue
+        if not matches:
+            raise RuntimeError(
+                f"Could not find the {action} title-bar button on {window.window_text()!r}; "
+                f"visible buttons: {', '.join(labels)}"
+            )
+
+        _, button, rect = max(matches, key=lambda match: match[0])
+        x = sample_axis(rect.left, rect.right, self.rng)
+        y = sample_axis(rect.top, rect.bottom, self.rng)
+        self.move_and_click(x, y)
+        return button
+
+    def click_context_menu_item(self, name):
+        """Find a named context-menu item and click it via curve_move."""
+        desktop = Desktop(backend="uia")
+        roots = []
+        try:
+            roots.append(desktop.window(class_name="Progman").wrapper_object())
+        except Exception:
+            pass
+        roots.extend(desktop.windows())
+
+        wanted = name.casefold()
+        labels = []
+        seen = set()
+        for root in roots:
+            try:
+                controls = root.descendants()
+            except Exception:
+                continue
+            for control in controls:
+                try:
+                    key = (control.element_info.handle, tuple(control.element_info.runtime_id or ()))
+                    if key in seen or not control.is_visible():
+                        continue
+                    seen.add(key)
+                    label = control.window_text().replace("&", "").strip().casefold()
+                    if label:
+                        labels.append(label)
+                    if label == wanted:
+                        rect = control.rectangle()
+                        x = sample_axis(rect.left, rect.right, self.rng)
+                        y = sample_axis(rect.top, rect.bottom, self.rng)
+                        self.move_and_click(x, y)
+                        return control
+                except Exception:
+                    continue
+        raise RuntimeError(
+            f"Could not find visible context-menu item {name}; "
+            f"visible labels: {', '.join(dict.fromkeys(labels))[:1200]}"
+        )
 
     def type_text(self, text):
         user32 = ctypes.windll.user32
