@@ -53,11 +53,12 @@ class HelloWorldTask:
         """Copy the script path from its context menu and run it in PowerShell."""
         self.ui.fetch_desktop()
         x, y = self.ui.get_coords_desktop("helloworld.py")
-        pyautogui.keyDown("shift")
+        """pyautogui.keyDown("shift")
         try:
             self.ui.move_and_click(x, y, "right")
         finally:
-            pyautogui.keyUp("shift")
+            pyautogui.keyUp("shift")"""
+        self.ui.move_and_click(x, y, "right")
         self.timing.pause()
         self.ui.click_context_menu_item("Copy as path")
         self.timing.pause()
@@ -121,6 +122,7 @@ class HelloWorldTask:
         self.ui.move_and_click(x, y, "double")
         self._open_editor(document_name)
 
+        pyautogui.press("enter")
         pyautogui.hotkey("ctrl", "a")
         self.ui.type_text('print("Hello world!")')
         pyautogui.hotkey("ctrl", "s")
@@ -148,3 +150,5 @@ class HelloWorldTask:
                 "Renaming the new document to helloworld.py did not finish"
             )
         self._run_with_powershell()
+        self.timing.pause()
+        self.ui.click_window_button("close")

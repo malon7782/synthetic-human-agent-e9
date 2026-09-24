@@ -239,6 +239,7 @@ class UI:
 
     def click_context_menu_item(self, name):
         """Find a named context-menu item and click it via curve_move."""
+        self.timing.pause()
         desktop = Desktop(backend="uia")
         roots = []
         try:

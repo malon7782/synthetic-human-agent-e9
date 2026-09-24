@@ -2,7 +2,7 @@ import time
 import random
 import math
 
-class Timing:
+class Timing():
     def pause(self):
         # pause for 2 ~ 5 seconds
         # to simulate 'thinking' behavior
