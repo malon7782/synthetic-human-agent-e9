@@ -1,6 +1,3 @@
-import ctypes
-import pyautogui
-
 class DefaultTask:
     def __init__(self, ui, timing):
         self.ui = ui
@@ -8,7 +5,7 @@ class DefaultTask:
 
     def run(self):
         if not self.ui.is_on_desktop():
-            pyautogui.hotkey('win', 'd')
+            self.hotkey('win', 'd')
             # self.ui.press_hotkey()
             self.timing.delay()
 

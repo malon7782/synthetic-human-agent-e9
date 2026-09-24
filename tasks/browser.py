@@ -1,5 +1,3 @@
-import pyautogui
-
 class BrowserTask:
     def __init__(self, process, ui, timing):
         self.process = process
@@ -30,4 +28,3 @@ class BrowserTask:
         self.ui.move_and_click(x, y, "scroll", None, None, -500)
         self.ui.move_and_click(x, y, "scroll", None, None, -500)
         self.ui.move_and_click(x, y, "scroll", None, None, -500)
-
