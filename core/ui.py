@@ -3,6 +3,7 @@ import random
 import ctypes
 import pyautogui
 import time
+from contextlib import contextmanager
 from pywinauto import Desktop
 
 VK_MAP = {'win': 0x5B, 'ctrl': 0x11, 'alt': 0x12, 'shift': 0x10,
@@ -330,3 +331,29 @@ class UI:
 
     def hotkey(self, *keys):
         return pyautogui.hotkey(list(keys))
+
+    def key_down(self, key):
+        return pyautogui.keyDown(key)
+
+    def key_up(self, key):
+        return pyautogui.keyUp(key)
+
+    def screen_size(self):
+        return pyautogui.size()
+
+    def mouse_position(self):
+        return pyautogui.position()
+
+    def move_to(self, x, y, duration=0):
+        """Move directly to a trajectory point without adding a curve."""
+        return pyautogui.moveTo(x, y, duration=duration)
+
+    @contextmanager
+    def without_mouse_pause(self):
+        """Let a timed trajectory manage its own delays; restore on exit."""
+        original_pause = pyautogui.PAUSE
+        try:
+            pyautogui.PAUSE = 0
+            yield
+        finally:
+            pyautogui.PAUSE = original_pause

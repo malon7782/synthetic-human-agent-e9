@@ -1,7 +1,6 @@
 import os
 import re
 
-import pyautogui
 import pyperclip
 from pywinauto import Desktop
 
@@ -13,7 +12,7 @@ class HelloWorldTask:
 
     def _blank_desktop_point(self):
         """Find a point away from the cached desktop icons and taskbar."""
-        screen_width, screen_height = pyautogui.size()
+        screen_width, screen_height = self.ui.screen_size()
         icon_bounds = tuple(self.ui.desktop_icons.values())
 
         for y_ratio in (0.55, 0.45, 0.65, 0.35, 0.75):
@@ -53,11 +52,11 @@ class HelloWorldTask:
         """Copy the script path from its context menu and run it in PowerShell."""
         self.ui.fetch_desktop()
         x, y = self.ui.get_coords_desktop("helloworld.py")
-        """pyautogui.keyDown("shift")
+        """self.ui.key_down("shift")
         try:
             self.ui.move_and_click(x, y, "right")
         finally:
-            pyautogui.keyUp("shift")"""
+            self.ui.key_up("shift")"""
         self.ui.move_and_click(x, y, "right")
         self.timing.pause()
         self.ui.click_context_menu_item("Copy as path")
@@ -72,10 +71,10 @@ class HelloWorldTask:
             )
 
         self.timing.delay()
-        pyautogui.hotkey("win", "r")
+        self.ui.hotkey("win", "r")
         self.timing.delay()
         self.ui.type_text("powershell")
-        pyautogui.press("enter")
+        self.ui.press("enter")
 
         powershell = Desktop(backend="uia").window(title_re=".*PowerShell.*")
         try:
@@ -86,9 +85,9 @@ class HelloWorldTask:
 
         self.timing.pause()
         self.ui.type_text("python ")
-        pyautogui.hotkey("ctrl", "v")
+        self.ui.hotkey("ctrl", "v")
         self.timing.pause()
-        pyautogui.press("enter")
+        self.ui.press("enter")
 
     def run(self):
         """Create and run the script after DefaultTask prepares the desktop."""
@@ -106,13 +105,13 @@ class HelloWorldTask:
         x, y = self._blank_desktop_point()
 
         # Open the desktop context menu, then choose New > Text Document.
-        pyautogui.press("esc")
+        self.ui.press("esc")
         self.ui.move_and_click(x, y, "right")
         self.timing.delay()
         self.ui.click_context_menu_item("New")
         self.timing.delay()
         self.ui.click_context_menu_item("Text Document")
-        pyautogui.press("enter")
+        self.ui.press("enter")
         self.timing.delay()
 
         self.ui.fetch_desktop()
@@ -122,10 +121,10 @@ class HelloWorldTask:
         self.ui.move_and_click(x, y, "double")
         self._open_editor(document_name)
 
-        pyautogui.press("enter")
-        pyautogui.hotkey("ctrl", "a")
+        self.ui.press("enter")
+        self.ui.hotkey("ctrl", "a")
         self.ui.type_text('print("Hello world!")')
-        pyautogui.hotkey("ctrl", "s")
+        self.ui.hotkey("ctrl", "s")
         self.timing.delay()
         self.ui.click_window_button("close")
         self.timing.pause()
@@ -136,12 +135,12 @@ class HelloWorldTask:
         self.timing.delay()
         self.ui.click_context_menu_item("Rename")
         self.timing.delay()
-        pyautogui.hotkey("ctrl", "a")
+        self.ui.hotkey("ctrl", "a")
         self.ui.type_text("helloworld.py")
-        pyautogui.press("enter")
+        self.ui.press("enter")
         self.timing.delay()
         if not self.ui.is_on_desktop():
-            pyautogui.press("enter")
+            self.ui.press("enter")
             self.timing.delay()
 
         self.ui.fetch_desktop()

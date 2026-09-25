@@ -3,10 +3,20 @@ import random
 import math
 
 class Timing():
-    def pause(self):
-        # pause for 2 ~ 5 seconds
-        # to simulate 'thinking' behavior
-        time.sleep(random.uniform(1.0, 3.0))
+    def __init__(self, pause_action=None):
+        self.pause_action = pause_action
+
+    def pause(self, t=None, play=False):
+        """Pause for t seconds (default 1-2); play=False keeps the mouse still."""
+        if t is None:
+            t = random.uniform(1.0, 2.0)
+        if not math.isfinite(t) or t < 0:
+            raise ValueError("t must be a finite, non-negative number of seconds")
+        # main.py binds PlayTask.move_locally after creating the shared UI.
+        if play and self.pause_action is not None:
+            self.pause_action(t)
+        else:
+            time.sleep(t)
         
     def delay(self):
         # shorter pause = delay
@@ -25,9 +35,3 @@ class Timing():
         """Pause briefly before correcting an intentionally inaccurate move."""
         time.sleep(random.uniform(0.1, 0.3))
 
-    def play_pause(self):
-        """Pause between bursts of non-targeted desktop mouse activity."""
-        if random.random() < 0.75:
-            time.sleep(random.uniform(0.10, 0.30))
-        else:
-            time.sleep(random.uniform(0.35, 0.65))

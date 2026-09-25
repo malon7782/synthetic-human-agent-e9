@@ -5,7 +5,7 @@ class DefaultTask:
 
     def run(self):
         if not self.ui.is_on_desktop():
-            self.hotkey('win', 'd')
+            self.ui.hotkey('win', 'd')
             # self.ui.press_hotkey()
             self.timing.delay()
 
