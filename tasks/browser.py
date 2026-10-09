@@ -17,13 +17,13 @@ class BrowserTask:
         self.ui.move_and_click(x, y, "double")
         self.timing.pause()
 
-        pyautogui.hotkey('win', 'up')
+        self.ui.hotkey('win', 'up')
         self.timing.delay()
 
         self.ui.type_from_corpus("search")
         self.timing.pause()
 
-        pyautogui.press('enter')
+        self.ui.press('enter')
         self.timing.delay()
 
         self.ui.move_and_click(x, y)

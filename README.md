@@ -46,7 +46,4 @@ of decoupling!)
 
 ### **main.py**
 
-Nothing surprising, it is just the main entrance of the agent. Once main.py is evoked,
-there will be a infinite loop randomly selecting and calling task functions. 
-
 
