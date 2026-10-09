@@ -1,5 +1,6 @@
 import pyautogui
 
+
 class BrowserTask:
     def __init__(self, process, ui, timing):
         self.process = process
@@ -19,7 +20,7 @@ class BrowserTask:
         pyautogui.hotkey('win', 'up')
         self.timing.delay()
 
-        self.ui.type_text("676767")
+        self.ui.type_from_corpus("search")
         self.timing.pause()
 
         pyautogui.press('enter')
@@ -30,4 +31,3 @@ class BrowserTask:
         self.ui.move_and_click(x, y, "scroll", None, None, -500)
         self.ui.move_and_click(x, y, "scroll", None, None, -500)
         self.ui.move_and_click(x, y, "scroll", None, None, -500)
-

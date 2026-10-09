@@ -2,12 +2,13 @@ import time
 import random
 import math
 
+
 class Timing:
     def pause(self):
         # pause for 2 ~ 5 seconds
         # to simulate 'thinking' behavior
         time.sleep(random.uniform(1.0, 3.0))
-        
+
     def delay(self):
         # shorter pause = delay
         # to simulate unconscious lag between mouse movements
@@ -31,3 +32,9 @@ class Timing:
             time.sleep(random.uniform(0.10, 0.30))
         else:
             time.sleep(random.uniform(0.35, 0.65))
+
+    def typing_delay(self, char):
+        time.sleep(random.uniform(0.04, 0.15))
+
+        if char == " " and random.random() < 0.3:
+            self.delay()

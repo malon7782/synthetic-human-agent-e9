@@ -12,6 +12,22 @@ VK_MAP = {'win': 0x5B, 'ctrl': 0x11, 'alt': 0x12, 'shift': 0x10,
 VK_MAP.update({c: ord(c.upper()) for c in "abcdefghijklmnopqrstuvwxyz"})
 KEYEVENTF_KEYUP = 0x0002
 
+TEXT_CORPUS = {
+    "search": [
+        "676767676767",
+        "st engineeringst engineeringst engineering",
+        "ntulearnntulearnntulearn",
+        "useful bebop languageuseful bebop languageuseful bebop language"
+    ],
+    "sentence": [
+        "Where there is a will, there is a way.",
+        "Practice makes perfect.",
+        "I hate programming.",
+        "I hate bass.",
+    ],
+}
+
+
 def sample_axis(start, stop, rng):
     """sampling in [start, stop); the weights of two sites are zero"""
     if stop - start < 3:
@@ -25,6 +41,7 @@ def sample_axis(start, stop, rng):
     ]
 
     return rng.choices(positions, weights=weights, k=1)[0]
+
 
 class UI:
     def __init__(self, timing, rng=None):
@@ -177,7 +194,8 @@ class UI:
         # For drag, (x, y) is the start and (end_x, end_y) is the end.
         # For scroll, positive values scroll up and negative values scroll down.
         if button not in ("left", "double", "drag", "scroll", "middle", "right", "move"):
-            raise ValueError("button must be left, double, drag, scroll, middle, or right")
+            raise ValueError(
+                "button must be left, double, drag, scroll, middle, or right")
         if button == "drag" and (end_x is None or end_y is None):
             raise ValueError("drag requires end_x and end_y")
 
@@ -231,5 +249,44 @@ class UI:
         y = ctypes.windll.user32.GetSystemMetrics(1)
         xLow, xHigh = 0.25 * x, 0.75 * x
         yLow, yHigh = 0.25 * y, 0.75 * y
-        if range == "mid" :
+        if range == "mid":
             return (0.5 * random.random() + 0.25)*x, (0.5 * random.random() + 0.25)*y
+
+    def choose_text(self, category, rng=None):
+        generator = rng if rng is not None else random
+
+        if category not in TEXT_CORPUS:
+            raise ValueError(f"Unknown text category: {category}")
+
+        texts = TEXT_CORPUS[category]
+        if not texts:
+            raise ValueError(f"No texts in category: {category}")
+        return generator.choice(texts)
+
+    def typo(self, char):
+        letters = "abcdefghijklmnopqrstuvwxyz"
+
+        if char not in letters:
+            return
+
+        wrong_char = self.rng.choice(letters.replace(char, ""))
+
+        pyautogui.write(wrong_char)
+        self.timing.delay()
+
+        pyautogui.press("backspace")
+        self.timing.delay()
+
+    def type_from_corpus(self, category="search", typo_rate=0.2):
+        text = self.choose_text(category, rng=self.rng)
+
+        self.type_text("")
+
+        for char in text:
+            self.timing.typing_delay(char)
+            if self.rng.random() < typo_rate:
+                self.typo(char)
+
+            pyautogui.write(char)
+
+        return text
