@@ -1,0 +1,5 @@
+PyAutoGUI==0.9.54
+pywinauto==0.6.9
+pyperclip==1.11.0
+comtypes==1.4.17
+pywin32==312

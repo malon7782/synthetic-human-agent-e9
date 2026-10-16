@@ -1,6 +1,7 @@
 import math
 import random
 import ctypes
+from ctypes import wintypes
 import pyautogui
 import time
 from contextlib import contextmanager
@@ -81,6 +82,7 @@ class UI:
 
     def curve_move(self, x, y, correction=True):
         """Move toward the supplied screen coordinates without clicking."""
+        self.timing.check()
         if x is None or y is None:
             raise ValueError("curve_move requires both x and y coordinates")
 
@@ -139,6 +141,7 @@ class UI:
                 # points use the short timing policy below instead.
                 pyautogui.PAUSE = 0
                 for index, point in enumerate(points, start=1):
+                    self.timing.check()
                     progress = index / point_count
                     point_x, point_y = clamp(round(point[0]), round(point[1]))
                     pyautogui.moveTo(point_x, point_y, duration=0)
@@ -283,20 +286,134 @@ class UI:
                     label = control.window_text().replace("&", "").strip().casefold()
                     if label:
                         labels.append(label)
-                    if label == wanted:
-                        rect = control.rectangle()
-                        x = sample_axis(rect.left, rect.right, self.rng)
-                        y = sample_axis(rect.top, rect.bottom, self.rng)
-                        self.move_and_click(x, y)
-                        return control
                 except Exception:
                     continue
+                if label == wanted:
+                    rect = control.rectangle()
+                    x = sample_axis(rect.left, rect.right, self.rng)
+                    y = sample_axis(rect.top, rect.bottom, self.rng)
+                    # Input/cancellation errors must escape the UIA discovery loop.
+                    self.move_and_click(x, y)
+                    return control
         raise RuntimeError(
             f"Could not find visible context-menu item {name}; "
             f"visible labels: {', '.join(dict.fromkeys(labels))[:1200]}"
         )
 
+    def visible_windows(self):
+        return Desktop(backend="uia").windows(visible_only=True)
+
+    @staticmethod
+    def desktop_directory():
+        """Resolve the redirected Desktop through the Windows known-folder API."""
+        from comtypes import GUID
+        from win32com.shell import shellcon
+        path = wintypes.LPWSTR()
+        folder = GUID(shellcon.FOLDERID_Desktop)
+        get_path = ctypes.OleDLL("shell32").SHGetKnownFolderPath
+        get_path.argtypes = [ctypes.POINTER(GUID), wintypes.DWORD, wintypes.HANDLE, ctypes.POINTER(wintypes.LPWSTR)]
+        get_path.restype = ctypes.HRESULT
+        get_path(ctypes.byref(folder), 0, None, ctypes.byref(path))
+        try:
+            return path.value
+        finally:
+            free = ctypes.windll.ole32.CoTaskMemFree
+            free.argtypes = [ctypes.c_void_p]
+            free(ctypes.cast(path, ctypes.c_void_p))
+
+    def foreground_window(self):
+        user32 = ctypes.windll.user32
+        user32.GetForegroundWindow.restype = wintypes.HWND
+        return Desktop(backend="uia").window(handle=user32.GetForegroundWindow()).wrapper_object()
+
+    def window_executable(self, window):
+        """Read the selected window's actual process image, without title guesses."""
+        kernel32 = ctypes.windll.kernel32
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        handle = kernel32.OpenProcess(0x1000, False, window.process_id())
+        if not handle:
+            raise OSError("Could not read the observed window's process")
+        try:
+            size = wintypes.DWORD(32768)
+            path = ctypes.create_unicode_buffer(size.value)
+            if not kernel32.QueryFullProcessImageNameW(handle, 0, path, ctypes.byref(size)):
+                raise OSError("Could not read the observed window's executable path")
+            return path.value.rsplit("\\", 1)[-1]
+        finally:
+            kernel32.CloseHandle(handle)
+
+    def wait_until(self, predicate, description, timeout=15):
+        deadline = time.monotonic() + timeout
+        while True:
+            self.timing.check()
+            value = predicate()
+            if value:
+                return value
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f"Timed out waiting for {description}")
+            self.timing.sleep(min(0.2, max(0, deadline - time.monotonic())))
+
+    def focus_window(self, window):
+        self.timing.check()
+        window.set_focus()
+        self.wait_until(lambda: self.foreground_window().handle == window.handle,
+                        f"window {window.handle} to receive focus", timeout=5)
+
+    @staticmethod
+    def control_id(control):
+        get_id = ctypes.windll.user32.GetDlgCtrlID
+        get_id.argtypes = [wintypes.HWND]
+        get_id.restype = ctypes.c_int
+        return get_id(control.handle)
+
+    def wait_browser_document(self, window, url, timeout=30):
+        """Wait on the live-observed Edge address edit and document root.
+
+        This establishes an accessible loaded document, not network-idle or
+        application readiness; certificate/error documents fail explicitly.
+        """
+        from urllib.parse import urlsplit
+        wanted_host = urlsplit(url).hostname
+        def ready():
+            edits = [control for control in window.descendants(control_type="Edit")
+                     if control.element_info.automation_id == "view_1017"]
+            documents = [control for control in window.descendants(control_type="Document")
+                         if control.element_info.automation_id == "RootWebArea"]
+            if not edits or not documents:
+                return False
+            value = edits[0].get_value()
+            parsed = urlsplit(value if "://" in value else "https://" + value)
+            if parsed.hostname != wanted_host:
+                return False
+            document = documents[0]
+            properties = document.legacy_properties()
+            document_host = urlsplit(properties.get("Value", "")).hostname
+            if document_host != wanted_host or properties.get("State", 0) & 0x800:
+                return False
+            if not document.is_visible() or not document.descendants():
+                return False
+            # Error-document headings can be exposed only in descendant text,
+            # while the document's own name remains the requested URL.
+            texts = []
+            for control in [document] + document.descendants():
+                texts.append(control.window_text())
+                try:
+                    texts.append(control.iface_text.DocumentRange.GetText(-1))
+                except Exception:
+                    # Many controls do not implement the UIA Text pattern.
+                    continue
+            accessible = "\n".join(texts).casefold()
+            warnings = ("privacy error", "can't reach this page", "certificate error", "your connection isn't private", "your connection is not private", "net::err_")
+            if any(text in accessible for text in warnings):
+                raise RuntimeError(f"Edge exposed an error/warning document at {url}")
+            return document
+        return self.wait_until(ready, f"Edge document at {url}", timeout)
+
     def type_text(self, text):
+        self.timing.check()
         user32 = ctypes.windll.user32
         user32.GetForegroundWindow.restype = ctypes.c_void_p
         user32.GetKeyboardLayout.restype = ctypes.c_void_p
@@ -461,15 +578,19 @@ class UI:
             return (0.5 * random.random() + 0.25)*x, (0.5 * random.random() + 0.25)*y
 
     def press(self, *keys):
+        self.timing.check()
         return pyautogui.press(list(keys))
 
     def hotkey(self, *keys):
+        self.timing.check()
         return pyautogui.hotkey(list(keys))
 
     def key_down(self, key):
+        self.timing.check()
         return pyautogui.keyDown(key)
 
     def key_up(self, key):
+        self.timing.check()
         return pyautogui.keyUp(key)
 
     def screen_size(self):
@@ -480,6 +601,7 @@ class UI:
 
     def move_to(self, x, y, duration=0):
         """Move directly to a trajectory point without adding a curve."""
+        self.timing.check()
         return pyautogui.moveTo(x, y, duration=duration)
 
     @contextmanager

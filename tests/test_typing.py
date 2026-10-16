@@ -45,6 +45,9 @@ with patch.dict(sys.modules, {"pyautogui": _keys, "pywinauto": _windows}):
 
 
 class Timing:
+    def check(self):
+        pass
+
     def delay(self):
         pass
 

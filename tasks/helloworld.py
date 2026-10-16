@@ -1,14 +1,68 @@
 import os
-import re
+import ntpath
+import sys
 
 import pyperclip
-from pywinauto import Desktop
 
 
 class HelloWorldTask:
     def __init__(self, ui, timing):
         self.ui = ui
         self.timing = timing
+
+    @staticmethod
+    def _choose_script_name(names):
+        existing = {name.casefold() for name in names}
+        if "helloworld.py" not in existing:
+            return "helloworld.py"
+        number = 2
+        while f"helloworld_{number}.py" in existing:
+            number += 1
+        return f"helloworld_{number}.py"
+
+    @staticmethod
+    def _validate_script_path(copied, script_name, desktop_directory):
+        path = copied.strip()
+        if path.startswith('"') and path.endswith('"'):
+            path = path[1:-1]
+        if (not ntpath.isabs(path) or '"' in path or "\n" in path or "\r" in path
+                or ntpath.normcase(ntpath.normpath(path)) != ntpath.normcase(ntpath.normpath(ntpath.join(desktop_directory, script_name)))):
+            raise RuntimeError(f"Copy as path did not copy the expected {script_name!r}: {copied!r}")
+        return path
+
+    @staticmethod
+    def _validate_script_file(path, expected_content):
+        try:
+            with open(path, encoding="utf-8-sig") as script:
+                content = script.read()
+        except (OSError, UnicodeError) as error:
+            raise RuntimeError(f"Could not read the created script {path!r}") from error
+        if content not in (expected_content, expected_content + "\n"):
+            raise RuntimeError(f"The created script content differs from the intended script: {path!r}")
+
+    def _wait_desktop(self, predicate, description):
+        def observed():
+            self.ui.fetch_desktop()
+            return predicate()
+        return self.ui.wait_until(observed, description)
+
+    @staticmethod
+    def _execution_succeeded(output):
+        lines = {line.strip() for line in output.splitlines()}
+        return "Hello, world!" in lines and "SHA_EXIT_CODE=0" in lines
+
+    @staticmethod
+    def _console_output(window):
+        """Read accessible console text without clipboard or keyboard actions."""
+        texts = []
+        for control in [window] + window.descendants():
+            texts.append(control.window_text())
+            try:
+                texts.append(control.iface_text.DocumentRange.GetText(-1))
+            except Exception:
+                # Most UIA controls do not implement the Text pattern.
+                continue
+        return "\n".join(texts)
 
     def _blank_desktop_point(self):
         """Find a point away from the cached desktop icons and taskbar."""
@@ -36,70 +90,118 @@ class HelloWorldTask:
             )
         return new_names.pop()
 
-    @staticmethod
-    def _open_editor(document_name):
-        title_pattern = f".*{re.escape(document_name)}.*"
-        editor = Desktop(backend="uia").window(title_re=title_pattern)
-        try:
-            editor.wait("visible", timeout=15)
-            editor.set_focus()
-        except Exception as error:
-            raise RuntimeError(
-                f"The editor window for {document_name!r} did not appear"
-            ) from error
+    def _open_editor(self, document_name, previous_handles):
+        def observed():
+            matches = []
+            for window in self.ui.visible_windows():
+                if window.handle in previous_handles:
+                    continue
+                controls = window.descendants()
+                identities = [control for control in controls
+                              if control.element_info.name == document_name
+                              and control.element_info.control_type in ("Document", "Edit", "TabItem")
+                              and control.is_visible()
+                              and (control.element_info.control_type != "TabItem" or control.is_selected())]
+                if not identities:
+                    continue
+                buffers = []
+                for control in controls:
+                    if control.element_info.control_type not in ("Document", "Edit") or not control.is_visible():
+                        continue
+                    try:
+                        text = control.iface_text.DocumentRange.GetText(-1)
+                    except Exception:
+                        continue
+                    buffers.append((control, text))
+                if len(buffers) == 1 and buffers[0][1] == "":
+                    matches.append((window, buffers[0][0]))
+            return matches[0] if len(matches) == 1 else None
+        result = self.ui.wait_until(observed, f"a new editor window with exact document identity {document_name!r} and one empty accessible buffer")
+        if result is None:
+            raise RuntimeError("The newly opened editor/document identity could not be verified")
+        editor, buffer = result
+        self.ui.focus_window(editor)
+        if buffer.iface_text.DocumentRange.GetText(-1) != "":
+            raise RuntimeError("The verified editor buffer is no longer empty")
+        rect = buffer.rectangle()
+        self.ui.move_and_click((rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2)
+        return editor
 
-    def _run_with_powershell(self):
+    def _confirm_extension_change(self, previous_handles):
+        # Exact English resource text inspected in shell32.dll.mui by root.
+        expected = "If you change a file name extension, the file might become unusable. Are you sure you want to change it?"
+        for window in self.ui.visible_windows():
+            if window.handle in previous_handles or self.ui.foreground_window().handle != window.handle:
+                continue
+            if self.ui.window_executable(window).casefold() != "explorer.exe":
+                continue
+            controls = window.descendants()
+            body = " ".join(" ".join(control.window_text().split()) for control in controls
+                            if control.element_info.control_type == "Text").strip()
+            if body != expected:
+                continue
+            buttons = [control for control in controls
+                       if control.element_info.control_type == "Button" and control.is_visible()
+                       and control.window_text().replace("&", "").strip() == "Yes"
+                       and self.ui.control_id(control) == 6]
+            if len(buttons) != 1:
+                continue
+            rect = buttons[0].rectangle()
+            self.ui.move_and_click((rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2)
+            return True
+        return False
+
+    def _new_console(self, previous_handles):
+        window = self.ui.foreground_window()
+        if window.handle in previous_handles:
+            return None
+        # Classic Console Host and Windows Terminal host the launched shell.
+        if self.ui.window_executable(window).casefold() in ("powershell.exe", "windowsterminal.exe", "conhost.exe"):
+            return window
+        return None
+
+    def _run_with_powershell(self, script_name, expected_content):
         """Copy the script path from its context menu and run it in PowerShell."""
         self.ui.fetch_desktop()
-        x, y = self.ui.get_coords_desktop("helloworld.py")
-        """self.ui.key_down("shift")
-        try:
-            self.ui.move_and_click(x, y, "right")
-        finally:
-            self.ui.key_up("shift")"""
+        x, y = self.ui.get_coords_desktop(script_name)
+        pyperclip.copy("")
         self.ui.move_and_click(x, y, "right")
         self.timing.pause()
         self.ui.click_context_menu_item("Copy as path")
         self.timing.pause()
 
-        script_path = pyperclip.paste().strip()
-        script_name = os.path.basename(script_path.strip('"')).casefold()
-        if script_name != "helloworld.py":
-            raise RuntimeError(
-                "Copy as path did not copy the expected helloworld.py file; "
-                f"clipboard contents: {script_path!r}"
-            )
+        script_path = self._validate_script_path(pyperclip.paste(), script_name, self.ui.desktop_directory())
+        self._validate_script_file(script_path, expected_content)
 
         self.timing.delay()
+        previous_handles = {window.handle for window in self.ui.visible_windows()}
         self.ui.hotkey("win", "r")
         self.timing.delay()
         self.ui.type_text("powershell")
         self.ui.press("enter")
 
-        powershell = Desktop(backend="uia").window(title_re=".*PowerShell.*")
-        try:
-            powershell.wait("visible", timeout=15)
-            powershell.set_focus()
-        except Exception as error:
-            raise RuntimeError("The PowerShell window did not appear") from error
+        powershell = self.ui.wait_until(lambda: self._new_console(previous_handles), "new PowerShell console window")
+        self.ui.focus_window(powershell)
 
         self.timing.pause()
-        self.ui.type_text("python ")
+        python = sys.executable.replace("'", "''")
+        self.ui.type_text(f"& '{python}' ")
+        pyperclip.copy("'" + script_path.replace("'", "''") + "'")
         self.ui.hotkey("ctrl", "v")
         self.timing.pause()
+        self.ui.type_text("; Write-Output ('SHA_EXIT_CODE=' + $LASTEXITCODE)")
         self.ui.press("enter")
+        self.ui.wait_until(lambda: self._execution_succeeded(self._console_output(powershell)),
+                           "visible Hello, world! output and SHA_EXIT_CODE=0; console must expose accessible text",
+                           timeout=30)
+        # Only actual output lines establish execution. Keep the console visible.
+        return {"status": "execution_verified", "script_path": script_path,
+                "powershell_handle": powershell.handle}
 
     def run(self):
         """Create and run the script after DefaultTask prepares the desktop."""
         self.ui.fetch_desktop()
-        if any(
-            name.casefold() == "helloworld.py"
-            for name in self.ui.desktop_icons
-        ):
-            raise RuntimeError(
-                "helloworld.py already exists on the desktop; "
-                "move or rename it before running this task"
-            )
+        script_name = self._choose_script_name(self.ui.desktop_icons)
 
         previous_names = set(self.ui.desktop_icons)
         x, y = self._blank_desktop_point()
@@ -114,40 +216,48 @@ class HelloWorldTask:
         self.ui.press("enter")
         self.timing.delay()
 
-        self.ui.fetch_desktop()
+        self._wait_desktop(lambda: set(self.ui.desktop_icons) - previous_names,
+                           "a newly created desktop text document")
         document_name = self._find_new_desktop_item(previous_names)
+        if not document_name.casefold().endswith(".txt"):
+            raise RuntimeError("Show file name extensions and use English New > Text Document before running HelloWorldTask; "
+                               f"observed new item: {document_name!r}")
 
         x, y = self.ui.get_coords_desktop(document_name)
+        created_path = ntpath.join(self.ui.desktop_directory(), document_name)
+        if not os.path.isfile(created_path) or os.path.getsize(created_path) != 0:
+            raise RuntimeError(f"The freshly created Desktop document is not an empty file: {created_path!r}")
+        previous_handles = {window.handle for window in self.ui.visible_windows()}
         self.ui.move_and_click(x, y, "double")
-        self._open_editor(document_name)
+        editor = self._open_editor(document_name, previous_handles)
 
-        self.ui.press("enter")
-        self.ui.hotkey("ctrl", "a")
-        self.ui.type_from_corpus("helloworld")
+        script_text = self.ui.type_from_corpus("helloworld", typo_rate=0)
         self.ui.hotkey("ctrl", "s")
         self.timing.delay()
+        self.ui.focus_window(editor)
         self.ui.click_window_button("close")
         self.timing.pause()
 
         self.ui.fetch_desktop()
+        if any(name.casefold() == script_name.casefold() for name in self.ui.desktop_icons):
+            raise RuntimeError(f"A file named {script_name!r} appeared before rename; preserving both files")
         x, y = self.ui.get_coords_desktop(document_name)
         self.ui.move_and_click(x, y, "right")
         self.timing.delay()
         self.ui.click_context_menu_item("Rename")
         self.timing.delay()
         self.ui.hotkey("ctrl", "a")
-        self.ui.type_text("helloworld.py")
+        self.ui.type_text(script_name)
+        before_rename = {window.handle for window in self.ui.visible_windows()}
         self.ui.press("enter")
         self.timing.delay()
-        if not self.ui.is_on_desktop():
-            self.ui.press("enter")
-            self.timing.delay()
-
-        self.ui.fetch_desktop()
-        if "helloworld.py" not in self.ui.desktop_icons:
-            raise RuntimeError(
-                "Renaming the new document to helloworld.py did not finish"
-            )
-        self._run_with_powershell()
-        self.timing.pause()
-        self.ui.click_window_button("close")
+        confirmed = False
+        def renamed():
+            nonlocal confirmed
+            if script_name in self.ui.desktop_icons and document_name not in self.ui.desktop_icons:
+                return True
+            if not confirmed:
+                confirmed = self._confirm_extension_change(before_rename)
+            return False
+        self._wait_desktop(renamed, f"rename to {script_name!r}; only a new Explorer dialog matching the verified extension-warning resource can be confirmed")
+        return self._run_with_powershell(script_name, script_text)
