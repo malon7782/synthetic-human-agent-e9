@@ -21,7 +21,8 @@ class BrowserTask:
         self.timing.delay()
 
         self.ui.type_from_corpus("search")
-        self.timing.pause()
+        self.timing.delay()
+        self.timing.delay()
 
         self.ui.press('enter')
         self.timing.delay()

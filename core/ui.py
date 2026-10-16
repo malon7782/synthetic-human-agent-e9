@@ -5,6 +5,7 @@ import pyautogui
 import time
 from contextlib import contextmanager
 from pywinauto import Desktop
+from core.text_corpus import TEXT_CORPUS, SEARCH_PARTS
 
 VK_MAP = {'win': 0x5B, 'ctrl': 0x11, 'alt': 0x12, 'shift': 0x10,
           'esc': 0x1B, 'enter': 0x0D, 'tab': 0x09}
@@ -12,24 +13,6 @@ VK_MAP = {'win': 0x5B, 'ctrl': 0x11, 'alt': 0x12, 'shift': 0x10,
 # {'a': 65, 'b': 66, 'c': 67....}
 VK_MAP.update({c: ord(c.upper()) for c in "abcdefghijklmnopqrstuvwxyz"})
 KEYEVENTF_KEYUP = 0x0002
-
-TEXT_CORPUS = {
-    "search": [
-        "676767676767",
-        "st engineeringst engineeringst engineering",
-        "ntulearnntulearnntulearn",
-        "useful bebop languageuseful bebop languageuseful bebop language"
-    ],
-    "sentence": [
-        "Where there is a will, there is a way.",
-        "Practice makes perfect.",
-        "I hate programming.",
-        "I hate bass.",
-    ],
-    "helloworld": [
-        "print(\"Hello, world!\")",
-    ],
-}
 
 
 def sample_axis(start, stop, rng):
@@ -349,41 +332,129 @@ class UI:
             return (0.5 * random.random() + 0.25)*x, (0.5 * random.random() + 0.25)*y
 
     def choose_text(self, category, rng=None):
-        generator = rng if rng is not None else random
+        rng = rng if rng is not None else random
 
         if category not in TEXT_CORPUS:
             raise ValueError(f"Unknown text category: {category}")
 
-        texts = TEXT_CORPUS[category]
-        if not texts:
+        if not TEXT_CORPUS[category]:
             raise ValueError(f"No texts in category: {category}")
-        return generator.choice(texts)
 
-    def typo(self, char):
+        if category == "search" and rng.random() < 0:
+            category = "thoughts"
+
+        text = rng.choice(TEXT_CORPUS[category])
+
+        if category == "search":
+            text = text.format(**{
+                name: rng.choice(options)
+                for name, options in SEARCH_PARTS.items()
+                if "{" + name + "}" in text
+            })
+
+        return text.strip()
+
+    def typo(self, char, next_char=None):
         letters = "abcdefghijklmnopqrstuvwxyz"
 
-        if char not in letters:
-            return
+        if char.lower() not in letters or len(char) != 1:
+            raise ValueError("typo expects one ASCII letter")
 
-        wrong_char = self.rng.choice(letters.replace(char, ""))
+        modes = ["replace", "repeat"]
+        weights = [0.1, 0.3]
 
-        pyautogui.write(wrong_char)
+        pair_available = (
+            next_char is not None
+            and len(next_char) == 1
+            and next_char.lower() in letters
+        )
+
+        if pair_available:
+            modes.append("omit")
+            weights.append(0.3)
+
+            if next_char != char:
+                modes.append("swap")
+                weights.append(0.3)
+
+        mode = self.rng.choices(
+            modes,
+            weights=weights,
+            k=1
+        )[0]
+
+        if mode == "replace":
+            correct = char
+            wrong = self.rng.choice(
+                letters.replace(char.lower(), "")
+            )
+
+            if char.isupper():
+                wrong = wrong.upper()
+
+        elif mode == "repeat":
+            correct = char
+            wrong = char*2
+
+        elif mode == "swap":
+            correct = char + next_char
+            wrong = next_char + char
+
+        else:
+            correct = char + next_char
+            wrong = next_char
+
+        for typed_char in wrong:
+            self.timing.typing_delay(typed_char)
+            pyautogui.write(typed_char)
+
         self.timing.delay()
 
-        pyautogui.press("backspace")
-        self.timing.delay()
+        if mode == "repeat":
+            pyautogui.press("backspace")
+            self.timing.delay()
+
+            return len(correct)
+
+        for _ in wrong:
+            pyautogui.press("backspace")
+            self.timing.delay()
+
+        for typed_char in correct:
+            self.timing.typing_delay(typed_char)
+            pyautogui.write(typed_char)
+
+        return len(correct)
 
     def type_from_corpus(self, category="search", typo_rate=0.2):
+        if not 0 <= typo_rate <= 1:
+            raise ValueError("typo_rate must be between 0 and 1")
+
         text = self.choose_text(category, rng=self.rng)
 
         self.type_text("")
 
-        for char in text:
-            self.timing.typing_delay(char)
-            if self.rng.random() < typo_rate:
-                self.typo(char)
+        index = 0
 
-            pyautogui.write(char)
+        while index < len(text):
+            char = text[index]
+
+            if (
+                char in "abcdefghijklmnopqrstuvwxyz" and self.rng.random() < typo_rate
+            ):
+                next_char = (
+                    text[index + 1]
+                    if index + 1 < len(text)
+                    else None
+                )
+
+                consumed = self.typo(char, next_char)
+                index += consumed
+
+            else:
+                self.timing.typing_delay(char)
+                pyautogui.write(char)
+                index += 1
 
         return text
         if range == "mid" :
