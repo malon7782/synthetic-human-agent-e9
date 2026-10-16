@@ -99,9 +99,17 @@ class HelloWorldTask:
                 controls = window.descendants()
                 identities = [control for control in controls
                               if control.element_info.name == document_name
-                              and control.element_info.control_type in ("Document", "Edit", "TabItem")
-                              and control.is_visible()
-                              and (control.element_info.control_type != "TabItem" or control.is_selected())]
+                              and control.element_info.control_type in ("Document", "Edit")
+                              and control.is_visible()]
+                # Live Notepad exposes the exact filename in a Text child;
+                # the selected tab's own name includes document-state text.
+                for control in controls:
+                    if (control.element_info.control_type == "TabItem"
+                            and control.is_visible() and control.is_selected()
+                            and (control.element_info.name == document_name
+                                 or any(child.element_info.name == document_name and child.is_visible()
+                                        for child in control.descendants(control_type="Text")))):
+                        identities.append(control)
                 if not identities:
                     continue
                 buffers = []
@@ -130,26 +138,28 @@ class HelloWorldTask:
     def _confirm_extension_change(self, previous_handles):
         # Exact English resource text inspected in shell32.dll.mui by root.
         expected = "If you change a file name extension, the file might become unusable. Are you sure you want to change it?"
-        for window in self.ui.visible_windows():
-            if window.handle in previous_handles or self.ui.foreground_window().handle != window.handle:
-                continue
-            if self.ui.window_executable(window).casefold() != "explorer.exe":
-                continue
-            controls = window.descendants()
-            body = " ".join(" ".join(control.window_text().split()) for control in controls
-                            if control.element_info.control_type == "Text").strip()
-            if body != expected:
-                continue
-            buttons = [control for control in controls
-                       if control.element_info.control_type == "Button" and control.is_visible()
-                       and control.window_text().replace("&", "").strip() == "Yes"
-                       and self.ui.control_id(control) == 6]
-            if len(buttons) != 1:
-                continue
-            rect = buttons[0].rectangle()
-            self.ui.move_and_click((rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2)
-            return True
-        return False
+        # Explorer can parent this dialog under the desktop rather than expose
+        # it in top-level windows(); its actual foreground handle is authoritative.
+        window = self.ui.foreground_window()
+        if window.handle in previous_handles or not window.is_visible():
+            return False
+        if self.ui.window_executable(window).casefold() != "explorer.exe":
+            return False
+        controls = window.descendants()
+        body = " ".join(" ".join(control.window_text().split()) for control in controls
+                        if control.element_info.control_type == "Text").strip()
+        if body != expected:
+            return False
+        buttons = [control for control in controls
+                   if control.element_info.control_type == "Button" and control.is_visible()
+                   and control.window_text().replace("&", "").strip() == "Yes"
+                   and (self.ui.control_id(control) == 6
+                        or control.element_info.automation_id == "CommandButton_6")]
+        if len(buttons) != 1:
+            return False
+        rect = buttons[0].rectangle()
+        self.ui.move_and_click((rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2)
+        return True
 
     def _new_console(self, previous_handles):
         window = self.ui.foreground_window()

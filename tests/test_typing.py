@@ -75,10 +75,20 @@ class TypingTests(unittest.TestCase):
         self.patch_keys = patch.object(ui_module, "pyautogui", self.keys)
         self.patch_keys.start()
         self.addCleanup(self.patch_keys.stop)
+        self.patch_foreground = patch.object(
+            ui_module.ctypes, "windll", types.SimpleNamespace(
+                user32=types.SimpleNamespace(GetForegroundWindow=lambda: 10)
+            )
+        )
+        self.patch_foreground.start()
+        self.addCleanup(self.patch_foreground.stop)
         self.ui = ui_module.UI(Timing(), random.Random(42))
-        # Corpus typing calls type_text("") only for keyboard preparation.
+        # Pure text tests replace only OS keyboard preparation and foreground.
         self.layout_calls = []
-        self.ui.type_text = self.layout_calls.append
+        def prepare_keyboard():
+            self.layout_calls.append("")
+            return 10
+        self.ui.ensure_english_keyboard = prepare_keyboard
 
     def test_all_correction_modes_restore_original_text_and_consumption(self):
         for mode, char, next_char, expected, consumed in (
@@ -167,25 +177,21 @@ class TypingTests(unittest.TestCase):
         self.assertEqual(self.keys.events, [])
 
     def test_keyboard_layout_switch_still_precedes_typing(self):
-        layouts = iter((0x0804, 0x0409))
-        user32 = types.SimpleNamespace(
-            GetForegroundWindow=lambda: 1,
-            GetWindowThreadProcessId=lambda *args: 2,
-            GetKeyboardLayoutList=lambda *args: 2,
-            GetKeyboardLayout=lambda *args: next(layouts),
-        )
-        with patch.object(ui_module.ctypes, "windll", types.SimpleNamespace(user32=user32)):
+        from test_keyboard import FakeWindows
+        del self.ui.ensure_english_keyboard
+        user32 = FakeWindows(delay=1)
+        self.ui.timing.sleep = user32.sleep
+        with patch.object(ui_module.ctypes, "windll", types.SimpleNamespace(user32=user32)), \
+                patch.object(ui_module.time, "monotonic", lambda: user32.now):
             ui_module.UI.type_text(self.ui, "ab")
         self.assertEqual(self.keys.text, "ab")
-        self.assertEqual(self.keys.events[:2], [("hotkey", ("win", "space")), ("sleep", 0.3)])
+        self.assertEqual(user32.posts, [(10, 0x0050, 0, 0x4090409)])
+        self.assertEqual(user32.layouts[10], 0x4090409)
 
     def test_unavailable_english_layout_raises_without_typing(self):
-        user32 = types.SimpleNamespace(
-            GetForegroundWindow=lambda: 1,
-            GetWindowThreadProcessId=lambda *args: 2,
-            GetKeyboardLayoutList=lambda *args: 1,
-            GetKeyboardLayout=lambda *args: 0x0804,
-        )
+        from test_keyboard import FakeWindows
+        del self.ui.ensure_english_keyboard
+        user32 = FakeWindows(installed=(0x8040804,))
         with patch.object(ui_module.ctypes, "windll", types.SimpleNamespace(user32=user32)):
             with self.assertRaises(RuntimeError):
                 ui_module.UI.type_text(self.ui, "ab")

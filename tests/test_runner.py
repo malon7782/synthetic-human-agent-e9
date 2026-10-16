@@ -67,6 +67,35 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(result.interrupted_task, "python")
         self.assertEqual([e["event"] for e in events], ["session_start", "task_start", "task_error", "session_end"])
 
+    def test_task_error_traceback_identifies_real_call_and_chained_cause(self):
+        run = self.runner()
+        events = []
+        def observed_window_process():
+            try:
+                raise ValueError("underlying process lookup failed")
+            except ValueError as exc:
+                raise OSError("Could not read observed window process") from exc
+        result = run({"python": Task(observed_window_process)}, once=True, emit=events.append)
+        failure = next(event for event in events if event["event"] == "task_error")
+        trace = failure.get("traceback", "")
+        self.assertIn("test_runner.py", trace)
+        self.assertIn("observed_window_process", trace)
+        self.assertIn("ValueError: underlying process lookup failed", trace)
+        self.assertIn("OSError: Could not read observed window process", trace)
+        self.assertEqual(result.status, "error")
+        self.assertEqual(result.completed, 0)
+
+    def test_keyboard_abort_traceback_identifies_interrupted_task(self):
+        run = self.runner()
+        events = []
+        def interrupted_task():
+            raise KeyboardInterrupt("manual stop")
+        result = run({"python": Task(interrupted_task)}, once=True, emit=events.append)
+        failure = next(event for event in events if event["event"] == "task_aborted")
+        self.assertIn("interrupted_task", failure.get("traceback", ""))
+        self.assertIn("KeyboardInterrupt: manual stop", failure.get("traceback", ""))
+        self.assertEqual(result.exit_code, 130)
+
     def test_keyboard_and_failsafe_abort_are_explicit_and_not_completed(self):
         run = self.runner()
         class FailSafe(Exception):
@@ -190,6 +219,26 @@ class CliTests(unittest.TestCase):
             self.assertEqual(events[-1]["event"], "session_end")
             self.assertEqual(events[-1]["status"], "error")
             self.assertEqual(events[-1]["completed"], 0)
+
+            failure = next(event for event in events if event["event"] == "startup_error")
+            self.assertIn("main.py", failure.get("traceback", ""))
+            self.assertIn("create_desktop_tasks", failure.get("traceback", ""))
+            self.assertIn("ModuleNotFoundError", failure.get("traceback", ""))
+
+    def test_startup_traceback_preserves_real_failure_location(self):
+        import main
+        def startup_process_failure(*args):
+            raise OSError("Could not read observed window process")
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(main, "create_desktop_tasks", startup_process_failure):
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                    code = main.main(["--once", "--countdown", "0", "--log-dir", directory])
+            events = [json.loads(line) for line in next(Path(directory).glob("*.jsonl")).read_text(encoding="utf-8").splitlines()]
+        failure = next(event for event in events if event["event"] == "startup_error")
+        self.assertIn("test_runner.py", failure.get("traceback", ""))
+        self.assertIn("startup_process_failure", failure.get("traceback", ""))
+        self.assertIn("OSError: Could not read observed window process", failure.get("traceback", ""))
+        self.assertEqual(code, 1)
 
     def test_failsafe_during_startup_is_an_abort(self):
         import main

@@ -184,6 +184,68 @@ class WorkflowTests(unittest.TestCase):
                         task._open_editor("New Text Document.txt", {7})
                     self.assertEqual(events, [])
 
+    def test_notepad_identity_uses_exact_text_under_selected_visible_tab(self):
+        filename = "New Text Document.txt"
+        for selected, tab_visible, child_name, child_visible, contents, accepted in (
+            (True, True, filename, True, "", True),
+            (False, True, filename, True, "", False),
+            (True, False, filename, True, "", False),
+            (True, True, filename + ".bak", True, "", False),
+            (True, True, filename, False, "", False),
+            (True, True, filename, True, "existing text", False),
+        ):
+            with self.subTest(selected=selected, visible=tab_visible, name=child_name, child_visible=child_visible, contents=contents):
+                events = []
+                label = types.SimpleNamespace(element_info=types.SimpleNamespace(control_type="Text", name=child_name), is_visible=lambda: child_visible)
+                close = types.SimpleNamespace(element_info=types.SimpleNamespace(control_type="Button", name="Close"), is_visible=lambda: True)
+                tab = types.SimpleNamespace(element_info=types.SimpleNamespace(control_type="TabItem", name="New Text Document.txt. Unmodified."),
+                    is_visible=lambda: tab_visible, is_selected=lambda: selected,
+                    descendants=lambda control_type=None: [label] if control_type == "Text" else [label, close])
+                restored_label = types.SimpleNamespace(element_info=types.SimpleNamespace(control_type="Text", name=filename), is_visible=lambda: True)
+                restored_tab = types.SimpleNamespace(element_info=types.SimpleNamespace(control_type="TabItem", name="restored tab"),
+                    is_visible=lambda: True, is_selected=lambda: False, descendants=lambda control_type=None: [restored_label])
+                buffer = types.SimpleNamespace(element_info=types.SimpleNamespace(name="Text editor", control_type="Document"), is_visible=lambda: True,
+                    iface_text=types.SimpleNamespace(DocumentRange=types.SimpleNamespace(GetText=lambda count: contents)),
+                    rectangle=lambda: types.SimpleNamespace(left=20, top=30, right=500, bottom=600))
+                window = types.SimpleNamespace(handle=8, descendants=lambda: [tab, label, close, restored_tab, restored_label, buffer])
+                ui = types.SimpleNamespace(visible_windows=lambda: [window], focus_window=lambda w: events.append(("focus", w.handle)),
+                    move_and_click=lambda *args: events.append(("click", args)), wait_until=lambda predicate, description: predicate())
+                task = hello.HelloWorldTask(ui, Timing())
+                if accepted:
+                    self.assertIs(task._open_editor(filename, {7}), window)
+                    self.assertEqual(events, [("focus", 8), ("click", (260, 315))])
+                else:
+                    with self.assertRaises(RuntimeError):
+                        task._open_editor(filename, {7})
+                    self.assertEqual(events, [])
+
+    def test_exact_selected_visible_tab_without_text_children_remains_supported(self):
+        filename = "New Text Document.txt"
+        for tab_name, selected, visible, accepted in (
+            (filename, True, True, True),
+            (filename, False, True, False),
+            (filename, True, False, False),
+            (filename + ".bak", True, True, False),
+        ):
+            with self.subTest(name=tab_name, selected=selected, visible=visible):
+                events = []
+                tab = types.SimpleNamespace(element_info=types.SimpleNamespace(control_type="TabItem", name=tab_name),
+                    is_visible=lambda: visible, is_selected=lambda: selected, descendants=lambda control_type=None: [])
+                buffer = types.SimpleNamespace(element_info=types.SimpleNamespace(name="Text editor", control_type="Document"), is_visible=lambda: True,
+                    iface_text=types.SimpleNamespace(DocumentRange=types.SimpleNamespace(GetText=lambda count: "")),
+                    rectangle=lambda: types.SimpleNamespace(left=20, top=30, right=500, bottom=600))
+                window = types.SimpleNamespace(handle=8, descendants=lambda: [tab, buffer])
+                ui = types.SimpleNamespace(visible_windows=lambda: [window], focus_window=lambda w: events.append(("focus", w.handle)),
+                    move_and_click=lambda *args: events.append(("click", args)), wait_until=lambda predicate, description: predicate())
+                task = hello.HelloWorldTask(ui, Timing())
+                if accepted:
+                    self.assertIs(task._open_editor(filename, {7}), window)
+                    self.assertEqual(events, [("focus", 8), ("click", (260, 315))])
+                else:
+                    with self.assertRaises(RuntimeError):
+                        task._open_editor(filename, {7})
+                    self.assertEqual(events, [])
+
     def test_browser_warning_in_accessible_body_is_rejected(self):
         edit = types.SimpleNamespace(element_info=types.SimpleNamespace(automation_id="view_1017"), get_value=lambda: "https://www.apple.com")
         warning = types.SimpleNamespace(window_text=lambda: "Your connection isn't private")
@@ -214,15 +276,60 @@ class WorkflowTests(unittest.TestCase):
             with self.subTest(process=process, old=old_handles, message=message, id=control_id):
                 events = []
                 text = types.SimpleNamespace(element_info=types.SimpleNamespace(control_type="Text"), window_text=lambda: message)
-                button = types.SimpleNamespace(element_info=types.SimpleNamespace(control_type="Button"), window_text=lambda: "&Yes", is_visible=lambda: True,
+                button = types.SimpleNamespace(element_info=types.SimpleNamespace(control_type="Button", automation_id=""), window_text=lambda: "&Yes", is_visible=lambda: True,
                     rectangle=lambda: types.SimpleNamespace(left=10, top=10, right=80, bottom=35))
-                window = types.SimpleNamespace(handle=50, descendants=lambda: [text, button])
+                window = types.SimpleNamespace(handle=50, is_visible=lambda: True, descendants=lambda: [text, button])
                 ui = types.SimpleNamespace(visible_windows=lambda: [window], foreground_window=lambda: window,
                     window_executable=lambda w: process, control_id=lambda c: control_id,
                     move_and_click=lambda *args: events.append(args))
                 task = hello.HelloWorldTask(ui, Timing())
                 self.assertEqual(task._confirm_extension_change(old_handles), expected)
                 self.assertEqual(bool(events), expected)
+
+    def test_extension_confirmation_accepts_live_uia_yes_with_native_id_zero(self):
+        body = "If you change a file name extension, the file might become unusable.\n\nAre you sure you want to change it?"
+        for automation_id, label, visible, duplicate, foreground, accepted in (
+            ("CommandButton_6", "Yes", True, False, True, True),
+            ("CommandButton_7", "Yes", True, False, True, False),
+            ("CommandButton_7", "No", True, False, True, False),
+            ("CommandButton_6", "No", True, False, True, False),
+            ("CommandButton_6", "Yes", False, False, True, False),
+            ("CommandButton_6", "Yes", True, True, True, False),
+            ("CommandButton_6", "Yes", True, False, False, False),
+        ):
+            with self.subTest(id=automation_id, label=label, visible=visible, duplicate=duplicate, foreground=foreground):
+                clicks = []
+                text = types.SimpleNamespace(element_info=types.SimpleNamespace(control_type="Text"), window_text=lambda: body)
+                yes = types.SimpleNamespace(element_info=types.SimpleNamespace(control_type="Button", automation_id=automation_id),
+                    window_text=lambda: label, is_visible=lambda: visible,
+                    rectangle=lambda: types.SimpleNamespace(left=10, top=10, right=80, bottom=35))
+                no = types.SimpleNamespace(element_info=types.SimpleNamespace(control_type="Button", automation_id="CommandButton_7"),
+                    window_text=lambda: "No", is_visible=lambda: True)
+                window = types.SimpleNamespace(handle=1837254, is_visible=lambda: True, descendants=lambda: [text, yes, no] + ([yes] if duplicate else []))
+                ui = types.SimpleNamespace(visible_windows=lambda: [window],
+                    foreground_window=lambda: window if foreground else types.SimpleNamespace(handle=99, is_visible=lambda: True, descendants=lambda: []),
+                    window_executable=lambda w: "explorer.exe", control_id=lambda c: 0,
+                    move_and_click=lambda *args: clicks.append(args))
+                task = hello.HelloWorldTask(ui, Timing())
+                self.assertEqual(task._confirm_extension_change(set()), accepted)
+                self.assertEqual(bool(clicks), accepted)
+
+    def test_extension_confirmation_finds_foreground_desktop_child_not_in_windows(self):
+        body = "If you change a file name extension, the file might become unusable.\n\nAre you sure you want to change it?"
+        for visible, previous_handles, accepted in ((True, set(), True), (False, set(), False), (True, {1837254}, False)):
+            with self.subTest(visible=visible, previous_handles=previous_handles):
+                clicks = []
+                text = types.SimpleNamespace(element_info=types.SimpleNamespace(control_type="Text"), window_text=lambda: body)
+                yes = types.SimpleNamespace(element_info=types.SimpleNamespace(control_type="Button", automation_id="CommandButton_6"),
+                    window_text=lambda: "Yes", is_visible=lambda: True,
+                    rectangle=lambda: types.SimpleNamespace(left=10, top=10, right=80, bottom=35))
+                window = types.SimpleNamespace(handle=1837254, is_visible=lambda: visible, descendants=lambda: [text, yes])
+                ui = types.SimpleNamespace(visible_windows=lambda: [], foreground_window=lambda: window,
+                    window_executable=lambda w: "explorer.exe", control_id=lambda c: 0,
+                    move_and_click=lambda *args: clicks.append(args))
+                task = hello.HelloWorldTask(ui, Timing())
+                self.assertEqual(task._confirm_extension_change(previous_handles), accepted)
+                self.assertEqual(bool(clicks), accepted)
 
     def test_console_success_requires_actual_output_and_zero_exit_line(self):
         verify = hello.HelloWorldTask._execution_succeeded

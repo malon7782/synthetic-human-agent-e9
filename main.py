@@ -8,6 +8,7 @@ from pathlib import Path
 import random
 import sys
 import time
+import traceback
 import uuid
 
 from core.runner import RunResult, run_session
@@ -117,14 +118,15 @@ def main(argv=None):
                                  abort_exceptions=abort_exceptions)
         except KeyboardInterrupt as exc:
             result = RunResult("aborted", 0, time.monotonic() - started, error=f"KeyboardInterrupt: {exc}")
-            emit({"event": "startup_aborted", "error": result.error})
+            emit({"event": "startup_aborted", "error": result.error, "traceback": traceback.format_exc()})
             emit({"event": "session_end", **result.__dict__})
         except Exception as exc:
             desktop_module = sys.modules.get("pyautogui")
             abort_types = (desktop_module.FailSafeException,) if desktop_module is not None else ()
             status = "aborted" if isinstance(exc, abort_types) else "error"
             result = RunResult(status, 0, time.monotonic() - started, error=f"{type(exc).__name__}: {exc}")
-            emit({"event": "startup_aborted" if status == "aborted" else "startup_error", "error": result.error})
+            emit({"event": "startup_aborted" if status == "aborted" else "startup_error",
+                  "error": result.error, "traceback": traceback.format_exc()})
             emit({"event": "session_end", **result.__dict__})
         print(f"Status: {result.status}; completed tasks: {result.completed}; elapsed: {result.elapsed:.2f}s", flush=True)
         if result.interrupted_task:

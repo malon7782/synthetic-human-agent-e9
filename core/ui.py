@@ -328,19 +328,29 @@ class UI:
 
     def window_executable(self, window):
         """Read the selected window's actual process image, without title guesses."""
-        kernel32 = ctypes.windll.kernel32
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
         kernel32.OpenProcess.restype = wintypes.HANDLE
         kernel32.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
+        kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
         kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-        handle = kernel32.OpenProcess(0x1000, False, window.process_id())
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        hwnd = window.handle
+        pid = window.process_id()
+
+        def process_error(api, code):
+            error = ctypes.WinError(code)
+            error.strerror = f"{error.strerror} ({api}; observed HWND={hwnd!r}, PID={pid})"
+            return error
+
+        handle = kernel32.OpenProcess(0x1000, False, pid)
         if not handle:
-            raise OSError("Could not read the observed window's process")
+            raise process_error("OpenProcess", ctypes.get_last_error())
         try:
             size = wintypes.DWORD(32768)
             path = ctypes.create_unicode_buffer(size.value)
             if not kernel32.QueryFullProcessImageNameW(handle, 0, path, ctypes.byref(size)):
-                raise OSError("Could not read the observed window's executable path")
+                raise process_error("QueryFullProcessImageNameW", ctypes.get_last_error())
             return path.value.rsplit("\\", 1)[-1]
         finally:
             kernel32.CloseHandle(handle)
@@ -412,26 +422,71 @@ class UI:
             return document
         return self.wait_until(ready, f"Edge document at {url}", timeout)
 
-    def type_text(self, text):
+    def ensure_english_keyboard(self, timeout=5):
+        """Select an installed English HKL and confirm the target accepted it.
+
+        WM_INPUTLANGCHANGEREQUEST is asynchronous. Poll the actual foreground
+        thread instead of cycling languages or assuming a fixed delay suffices.
+        Abort if another window takes focus rather than typing into that window.
+        """
         self.timing.check()
         user32 = ctypes.windll.user32
+        user32.GetForegroundWindow.argtypes = []
         user32.GetForegroundWindow.restype = ctypes.c_void_p
+        user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+        user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+        user32.GetKeyboardLayout.argtypes = [wintypes.DWORD]
         user32.GetKeyboardLayout.restype = ctypes.c_void_p
-        window = user32.GetForegroundWindow()
-        thread = user32.GetWindowThreadProcessId(ctypes.c_void_p(window), None)
+        user32.GetKeyboardLayoutList.argtypes = [ctypes.c_int, ctypes.POINTER(ctypes.c_void_p)]
+        user32.GetKeyboardLayoutList.restype = ctypes.c_int
+        user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, ctypes.c_size_t, ctypes.c_ssize_t]
+        user32.PostMessageW.restype = wintypes.BOOL
 
-        # Check English (0x09); Win+Space cycles through installed input languages.
-        for _ in range(user32.GetKeyboardLayoutList(0, None)):
-            if (user32.GetKeyboardLayout(thread) or 0) & 0x3FF == 0x09:
-                break
-            pyautogui.hotkey("win", "space")
-            pyautogui.sleep(0.3)
-        else:
-            raise RuntimeError("Could not switch to an English keyboard")
+        window = user32.GetForegroundWindow()
+        if not window:
+            raise RuntimeError("No foreground window for keyboard preparation")
+
+        def english_is_active():
+            if user32.GetForegroundWindow() != window:
+                raise RuntimeError("Foreground window changed during keyboard preparation")
+            thread = user32.GetWindowThreadProcessId(window, None)
+            if not thread:
+                raise RuntimeError("Could not obtain the foreground window thread")
+            return ((user32.GetKeyboardLayout(thread) or 0) & 0x3FF) == 0x09
+
+        if english_is_active():
+            return window
+
+        count = user32.GetKeyboardLayoutList(0, None)
+        if count <= 0:
+            raise RuntimeError("Could not enumerate installed keyboard layouts")
+        layouts = (ctypes.c_void_p * count)()
+        copied = user32.GetKeyboardLayoutList(count, layouts)
+        english = next((layout for layout in layouts[:copied]
+                        if layout and layout & 0x3FF == 0x09), None)
+        if english is None:
+            raise RuntimeError("No installed English keyboard layout")
+        if user32.GetForegroundWindow() != window:
+            raise RuntimeError("Foreground window changed during keyboard preparation")
+        # Use the exact enumerated handle; do not load layouts or modify settings.
+        if not user32.PostMessageW(window, 0x0050, 0, english):
+            raise RuntimeError("Could not request the installed English keyboard layout")
+        self.wait_until(english_is_active, "foreground English keyboard layout", timeout)
+        return window
+
+    def type_text(self, text):
+        window = self.ensure_english_keyboard()
 
         for char in text:
             self.timing.delay()
+            self._check_typing_target(window)
             pyautogui.write(char)
+
+    def _check_typing_target(self, window):
+        """Check immediately before every text/backspace event, after delays."""
+        self.timing.check()
+        if ctypes.windll.user32.GetForegroundWindow() != window:
+            raise RuntimeError("Foreground window changed before typing")
 
     def is_on_desktop(self):
         hwnd = ctypes.windll.user32.GetForegroundWindow()
@@ -471,11 +526,14 @@ class UI:
 
         return text.strip()
 
-    def typo(self, char, next_char=None):
+    def typo(self, char, next_char=None, *, target_window=None):
         letters = "abcdefghijklmnopqrstuvwxyz"
 
         if char.lower() not in letters or len(char) != 1:
             raise ValueError("typo expects one ASCII letter")
+
+        if target_window is None:
+            target_window = self.ensure_english_keyboard()
 
         modes = ["replace", "repeat"]
         weights = [0.1, 0.3]
@@ -523,22 +581,26 @@ class UI:
 
         for typed_char in wrong:
             self.timing.typing_delay(typed_char)
+            self._check_typing_target(target_window)
             pyautogui.write(typed_char)
 
         self.timing.delay()
 
         if mode == "repeat":
+            self._check_typing_target(target_window)
             pyautogui.press("backspace")
             self.timing.delay()
 
             return len(correct)
 
         for _ in wrong:
+            self._check_typing_target(target_window)
             pyautogui.press("backspace")
             self.timing.delay()
 
         for typed_char in correct:
             self.timing.typing_delay(typed_char)
+            self._check_typing_target(target_window)
             pyautogui.write(typed_char)
 
         return len(correct)
@@ -549,7 +611,7 @@ class UI:
 
         text = self.choose_text(category, rng=self.rng)
 
-        self.type_text("")
+        target_window = self.ensure_english_keyboard()
 
         index = 0
 
@@ -565,11 +627,12 @@ class UI:
                     else None
                 )
 
-                consumed = self.typo(char, next_char)
+                consumed = self.typo(char, next_char, target_window=target_window)
                 index += consumed
 
             else:
                 self.timing.typing_delay(char)
+                self._check_typing_target(target_window)
                 pyautogui.write(char)
                 index += 1
 

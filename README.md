@@ -14,9 +14,9 @@ A Windows desktop automation program that runs two predefined workflows through 
 - Microsoft Edge with a desktop shortcut named exactly **Microsoft Edge**. Finish browser first-run prompts beforehand. The browser workflow requires HTTPS access to `www.samsung.com`, `www.apple.com`, and `www.dell.com`; proxy, certificate, sign-in, consent, or connectivity problems can stop it.
 - Windows PowerShell available through **Win+R > powershell**, with console text exposed to Windows UI Automation. The Python workflow itself does not require Internet access.
 
-Live verification of the current workflows and target VM is pending. The Python workflow's editor behavior, guarded English Explorer extension-confirmation dialog, and accessible PowerShell output still need live validation. A different dialog, reused editor/console window, or inaccessible control causes a bounded failure.
+Local live verification on 2026-10-16: the complete Python workflow finished in **128.44 seconds**, including GUI file creation, editor input/save, extension confirmation, and execution with accessible `Hello, world!` and `SHA_EXIT_CODE=0` output. The current browser workflow finished in **56.34 seconds**, including closure of its new window. Logs: `run-20261016T065048-b2fcd258.jsonl` and `run-20261016T065315-83ea6a7b.jsonl` in the local evidence directory outside the source tree.
 
-Local evidence on 2026-10-16: dependencies installed into a fresh environment using Python 3.13.5. One earlier browser-only live smoke recorded one completed task in **45.96 seconds**, before stricter browser-readiness changes. It does not validate the current code. No HelloWorld, full 900-second session, or target-VM run has been verified.
+The full 900-second session has **not** passed acceptance. The latest attempt was stopped by the user via the mouse-corner fail-safe after **133.28 seconds**, with one Python task completed and a second interrupted (`run-20261016T065427-d860456d.jsonl`). Target-VM workflow verification remains pending: startup failed importing `win32ui` with a DLL-load error; the specific missing dependency has not been identified. A different dialog, reused editor/console window, or inaccessible control causes a bounded failure.
 
 ## Install
 
@@ -46,10 +46,10 @@ Do not copy an existing virtual environment between machines. Complete dependenc
 
 Save your work first and leave the desktop available. The agent takes control after the countdown; avoid competing mouse or keyboard input while it runs.
 
-First, try one Python workflow with a two-minute activity budget:
+First, try one Python workflow with a four-minute activity budget. Typing a long interpreter path can make the complete workflow exceed two minutes:
 
 ```powershell
-.\.venv\Scripts\python.exe .\main.py --tasks python --once --duration 120 --seed 7
+.\.venv\Scripts\python.exe .\main.py --tasks python --once --duration 240 --seed 7
 ```
 
 Then try the browser workflow when its network prerequisites are ready:
@@ -103,4 +103,4 @@ The browser workflow closes the new window it created after normal completion or
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-On 2026-10-16, all 50 tests passed in the fresh project environment; dependency and source-compilation checks also passed. The tests use isolated input/window substitutes. Passing them does not establish live focus, editor behavior, network access, or target-VM compatibility.
+On 2026-10-16, all 69 tests passed in the project environment. Regressions include the observed Notepad filename tab, installed English keyboard switching, input focus changes, Explorer's desktop-child extension dialog and UIA button identity, and native process-query diagnostics. The tests use isolated input/window substitutes. Passing them does not establish live focus, editor behavior, network access, or target-VM compatibility; the live checks above provide separate evidence.

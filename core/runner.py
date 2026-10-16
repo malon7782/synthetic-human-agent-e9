@@ -3,6 +3,7 @@ from dataclasses import asdict, dataclass
 import math
 import random
 import time
+import traceback
 
 from core.timing import DeadlineReached
 
@@ -89,15 +90,17 @@ def run_session(tasks, *, duration=900, once=False, prepare=None, timing=None,
     except DeadlineReached as exc:
         status = "duration_elapsed"
         if active is not None:
-            event("task_interrupted", task=active, reason=str(exc))
+            event("task_interrupted", task=active, reason=str(exc), traceback=traceback.format_exc())
     except (KeyboardInterrupt, *abort_exceptions) as exc:
         status = "aborted"
         error = f"{type(exc).__name__}: {exc}"
-        event("task_aborted" if active is not None else "session_aborted", task=active, error=error)
+        event("task_aborted" if active is not None else "session_aborted", task=active,
+              error=error, traceback=traceback.format_exc())
     except Exception as exc:
         status = "error"
         error = f"{type(exc).__name__}: {exc}"
-        event("task_error" if active is not None else "session_error", task=active, error=error)
+        event("task_error" if active is not None else "session_error", task=active,
+              error=error, traceback=traceback.format_exc())
     finally:
         if timing is not None:
             timing.deadline = previous_deadline
