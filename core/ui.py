@@ -194,7 +194,7 @@ class UI:
 
         if button == "double":
             pyautogui.doubleClick(
-                interval=self.rng.uniform(0.1, 0.2), button="left")
+                interval=self.rng.uniform(0.15, 0.3), button="left")
         elif button == "drag":
             pyautogui.mouseDown(button="left")
             try:
@@ -380,13 +380,15 @@ class UI:
         total = sum(weights)
         accumulated = 0
         previous = 0
-        move_at = self.rng.randrange(1, steps) if self.rng.random() < 0.4 else None
+        move_at = self.rng.randrange(
+            1, steps) if self.rng.random() < 0.4 else None
         original_pause = pyautogui.PAUSE
         try:
             pyautogui.PAUSE = 0
             for index, weight in enumerate(weights, start=1):
                 accumulated += weight
-                position = amount if index == steps else round(amount * accumulated / total)
+                position = amount if index == steps else round(
+                    amount * accumulated / total)
                 pyautogui.scroll(position - previous)
                 previous = position
                 time.sleep(self.rng.uniform(0.012, 0.035) if fast
@@ -415,7 +417,8 @@ class UI:
             if self.rng.random() >= probability:
                 break
             self.browse_mouse()
-            self.random_scroll(*pyautogui.position(), direction=-1 if index == 3 else None)
+            self.random_scroll(*pyautogui.position(),
+                               direction=-1 if index == 3 else None)
         self.browse_mouse()
 
     def close_window(self):
