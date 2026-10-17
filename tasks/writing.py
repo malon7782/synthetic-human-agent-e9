@@ -4,4 +4,4 @@ class WritingTask:
         self.timing = timing
 
     def run(self):
-        self.ui.write_sentences()
+        return self.ui.write_sentences() is not None

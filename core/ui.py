@@ -246,9 +246,6 @@ class UI:
     def choose_text(self, category, rng=None):
         rng = rng if rng is not None else random
 
-        if category == "search" and rng.random() < 0:
-            category = "thoughts"
-
         text = rng.choice(TEXT_CORPUS[category])
 
         if category == "search":
@@ -389,7 +386,8 @@ class UI:
                 accumulated += weight
                 position = amount if index == steps else round(
                     amount * accumulated / total)
-                pyautogui.scroll(position - previous)
+                if position != previous:
+                    pyautogui.scroll(position - previous)
                 previous = position
                 time.sleep(self.rng.uniform(0.012, 0.035) if fast
                            else self.rng.uniform(0.04, 0.10))
@@ -682,6 +680,7 @@ class UI:
             f"Notepad showing {path.name}")
         self.maximize_window(editor)
         self.prepare_document_keyboard(editor)
+        self.timing.pause()
         lines = []
         for index in range(count):
             if index:
@@ -719,7 +718,7 @@ class UI:
 
     def write_sentences(self):
         count = self.rng.choices(
-            (3, 4, 5, 6, 7), weights=(14, 18, 36, 18, 14), k=1)[0]
+            (3, 4, 5, 6, 7, 8, 9, 10, 11), weights=(2, 3, 5, 8, 12, 8, 5, 3, 2), k=1)[0]
         return self.write_desktop_document("notes", count=count)
 
     def write_hello_world(self):

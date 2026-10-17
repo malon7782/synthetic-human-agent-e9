@@ -10,7 +10,7 @@ class BrowserTask:
 
     def run(self):
         if not self.enabled:
-            return
+            return False
         self.ui.fetch_desktop()
 
         x, y = self.ui.get_coords_desktop("Microsoft Edge")
@@ -27,7 +27,7 @@ class BrowserTask:
             self.timing.pause()
             self.ui.close_window()
             print("Browser offline; disabled for this run.")
-            return
+            return False
 
         pyautogui.hotkey('ctrl', 'l')
         self.ui.type_from_corpus("search")
@@ -41,8 +41,9 @@ class BrowserTask:
         if not self.enabled:
             self.ui.close_window()
             print("Browser offline; disabled for this run.")
-            return
+            return False
 
         x, y = self.ui.center_of_desktop()
         self.ui.scroll_page(x, y)
         self.ui.close_window()
+        return True

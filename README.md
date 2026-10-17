@@ -28,6 +28,9 @@ behavior. Ideally, they are just safe wrappers of time.sleep().
  - core/ui.py: provides everything associated with UI operations, such as moving
  cursors, resizing windows, typing texts... 
 
+ - core/text_corpus.py: stores search queries, writing sentences, and template
+values used to generate varied text for browsing and writing tasks.
+
 ### **./tasks**
 
 This directory stores *task*s. a *task* is an abstraction of a series of adjacent
@@ -46,7 +49,17 @@ of decoupling!)
 
 ### **main.py**
 
-Nothing surprising, it is just the main entrance of the agent. Once main.py is evoked,
-there will be a infinite loop randomly selecting and calling task functions. 
+The entry point selects tasks until the configured time limit is reached.
+
+```sh
+python main.py                 # 15 minutes by default
+python main.py --minutes 20    # 20 minutes
+python main.py --minutes 0.5   # short 30-second trial
+```
+
+The limit uses a monotonic clock. Once time expires, no new task starts;
+the current task finishes normally, including saving, so the total run may
+exceed the requested duration. Ctrl+C or the PyAutoGUI corner fail-safe stops
+the run immediately.
 
 

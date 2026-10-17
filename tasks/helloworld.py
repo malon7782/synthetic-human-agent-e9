@@ -4,4 +4,4 @@ class HelloWorldTask:
         self.timing = timing
 
     def run(self):
-        self.ui.write_hello_world()
+        return self.ui.write_hello_world() is not None
