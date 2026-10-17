@@ -6,8 +6,11 @@ class BrowserTask:
         self.process = process
         self.ui = ui
         self.timing = timing
+        self.enabled = True
 
     def run(self):
+        if not self.enabled:
+            return
         self.ui.fetch_desktop()
 
         x, y = self.ui.get_coords_desktop("Microsoft Edge")
@@ -17,9 +20,16 @@ class BrowserTask:
         self.ui.move_and_click(x, y, "double")
         self.timing.pause()
 
-        pyautogui.hotkey('win', 'up')
-        self.timing.delay()
+        self.ui.maximize_browser()
 
+        self.enabled = self.ui.edge_has_internet(check_page=False)
+        if not self.enabled:
+            self.timing.pause()
+            self.ui.close_window()
+            print("Browser offline; disabled for this run.")
+            return
+
+        pyautogui.hotkey('ctrl', 'l')
         self.ui.type_from_corpus("search")
         self.timing.delay()
         self.timing.delay()
@@ -27,8 +37,12 @@ class BrowserTask:
         pyautogui.press('enter')
         self.timing.delay()
 
-        self.ui.move_and_click(x, y)
-        self.ui.move_and_click(x, y, "scroll", None, None, -500)
-        self.ui.move_and_click(x, y, "scroll", None, None, -500)
-        self.ui.move_and_click(x, y, "scroll", None, None, -500)
-        self.ui.move_and_click(x, y, "scroll", None, None, -500)
+        self.enabled = self.ui.edge_has_internet(timeout=2)
+        if not self.enabled:
+            self.ui.close_window()
+            print("Browser offline; disabled for this run.")
+            return
+
+        x, y = self.ui.center_of_desktop()
+        self.ui.scroll_page(x, y)
+        self.ui.close_window()
