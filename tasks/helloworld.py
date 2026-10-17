@@ -4,4 +4,8 @@ class HelloWorldTask:
         self.timing = timing
 
     def run(self):
-        return self.ui.write_hello_world() is not None
+        path = self.ui.write_hello_world()
+        if path is None:
+            return False
+        # Save As creates a separate PY; arrange only the original TXT.
+        return self.ui.organize_desktop_file(self.ui.last_created_text_path)

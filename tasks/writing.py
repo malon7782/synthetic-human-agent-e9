@@ -4,4 +4,7 @@ class WritingTask:
         self.timing = timing
 
     def run(self):
-        return self.ui.write_sentences() is not None
+        path = self.ui.write_sentences()
+        if path is None:
+            return False
+        return self.ui.organize_desktop_file(path)

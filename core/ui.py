@@ -38,6 +38,9 @@ class UI:
         self.timing = timing
         self.rng = rng if rng is not None else random.Random()
         self.desktop_icons = {}
+        self.desktop_item_bounds = []
+        self.desktop_item_bounds_by_name = {}
+        self.last_created_text_path = None
 
     def fetch_desktop(self):
         # Locate the desktop icon list
@@ -53,8 +56,13 @@ class UI:
         list_view = Desktop(backend="win32").window(
             handle=icon_list.handle
         ).wrapper_object()
+        # LVM_GETITEMSPACING: use Explorer's actual grid (including DPI/view size).
+        spacing = list_view.send_message(0x1033, 0, 0)
+        self.desktop_grid_spacing = (spacing & 0xFFFF, (spacing >> 16) & 0xFFFF)
 
         icons = {}
+        item_bounds = []
+        bounds_by_name = {}
 
         for index in range(list_view.item_count()):
             item = list_view.get_item(index)
@@ -71,8 +79,244 @@ class UI:
 
             # Cache the bounds, without sampling a point yet
             icons[name] = (left, top, right, bottom)
+            full_rect = item.rectangle(area="all")
+            full_left, full_top = list_view.client_to_screen(
+                (full_rect.left, full_rect.top))
+            full_right, full_bottom = list_view.client_to_screen(
+                (full_rect.right, full_rect.bottom))
+            item_bounds.append((full_left, full_top, full_right, full_bottom))
+            bounds_by_name[name] = item_bounds[-1]
 
         self.desktop_icons = icons
+        self.desktop_item_bounds = item_bounds
+        self.desktop_item_bounds_by_name = bounds_by_name
+
+    def desktop_work_area(self):
+        """Primary desktop bounds, excluding taskbar and screen-edge fail-safes."""
+        from ctypes import wintypes
+        work = wintypes.RECT()
+        if not ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(work), 0):
+            raise RuntimeError("Cannot read desktop work area")
+        width, height = pyautogui.size()
+        return (max(8, work.left + 8), max(8, work.top + 8),
+                min(width - 9, work.right - 9), min(height - 9, work.bottom - 9))
+
+    def desktop_creation_point(self, *, ordered=False, exclude_name=None):
+        """Choose a free icon-sized slot: column order or corner-weighted."""
+        if ordered:
+            return self.first_free_desktop_slot(exclude_name)
+        left, top, right, bottom = self.desktop_work_area()
+        items = (self.desktop_item_bounds if exclude_name is None else
+                 [bounds for name, bounds in self.desktop_item_bounds_by_name.items()
+                  if name != exclude_name])
+        # Respect Windows' configured icon spacing and the observed item sizes.
+        cell_w = max(ctypes.windll.user32.GetSystemMetrics(38),
+                     max((r - l for l, t, r, b in items), default=64) + 8)
+        cell_h = max(ctypes.windll.user32.GetSystemMetrics(39),
+                     max((b - t for l, t, r, b in items), default=64) + 8)
+        # Align the candidate grid with the existing top-left item, when present.
+        x0 = max(left + cell_w / 2,
+                 min((l for l, t, r, b in items if l >= left), default=left) + cell_w / 2)
+        y0 = max(top + cell_h / 2,
+                 min((t for l, t, r, b in items if t >= top), default=top) + cell_h / 2)
+        columns = list(range(round(x0), round(right - cell_w / 2) + 1, cell_w))
+        rows = list(range(round(y0), round(bottom - cell_h / 2) + 1, cell_h))
+        if self.rng.choice((False, True)):
+            columns.reverse()
+        free = []
+        for x in columns:
+            for y in rows:
+                # Reserve the full cell, including enough room for the filename.
+                if all(x + cell_w / 2 < l or x - cell_w / 2 > r
+                       or y + cell_h / 2 < t or y - cell_h / 2 > b
+                       for l, t, r, b in items):
+                    free.append((x, y))
+        if not free:
+            return None
+        if self.rng.random() < 0.5:
+            return free[0]  # Top to bottom, then the next inward column.
+        # Keep random placement in the outer quarter; prioritize the corners.
+        edge_slots = [(x, y) for x, y in free
+                      if min(x - left, right - x) <= (right - left) / 4
+                      or min(y - top, bottom - y) <= (bottom - top) / 4]
+        if not edge_slots:
+            return free[0]
+        weights = [(1 - min(x - left, right - x) / (right - left)) ** 4
+                   * (1 - min(y - top, bottom - y) / (bottom - top)) ** 4
+                   for x, y in edge_slots]
+        return self.rng.choices(edge_slots, weights=weights, k=1)[0]
+
+    def first_free_desktop_slot(self, exclude_name):
+        """Fill holes top-to-bottom in each column, starting at the left."""
+        left, top, right, bottom = self.desktop_work_area()
+        cell_w, cell_h = self.desktop_grid_spacing
+        if cell_w <= 0 or cell_h <= 0:
+            raise RuntimeError("Cannot read desktop icon grid spacing")
+        centers = {name: ((l + r) / 2, (t + b) / 2)
+                   for name, (l, t, r, b) in self.desktop_icons.items()
+                   if left <= (l + r) / 2 <= right and top <= (t + b) / 2 <= bottom}
+        if not centers:
+            return None
+        # Include the moving icon when finding the grid origin, but not occupancy.
+        x0 = min(x for x, y in centers.values())
+        y0 = min(y for x, y in centers.values())
+        while x0 - cell_w >= left:
+            x0 -= cell_w
+        while y0 - cell_h >= top:
+            y0 -= cell_h
+        occupied = {(round((x - x0) / cell_w), round((y - y0) / cell_h))
+                    for name, (x, y) in centers.items() if name != exclude_name}
+        # Leave room for the icon and label without reserving an extra grid cell.
+        right_margin = max(self.desktop_item_bounds_by_name[name][2] - x
+                           for name, (x, y) in centers.items())
+        bottom_margin = max(self.desktop_item_bounds_by_name[name][3] - y
+                            for name, (x, y) in centers.items())
+        columns = max(0, math.floor((right - right_margin - x0) / cell_w) + 1)
+        rows = max(0, math.floor((bottom - bottom_margin - y0) / cell_h) + 1)
+        for column in range(columns):
+            for row in range(rows):
+                if (column, row) not in occupied:
+                    return round(x0 + column * cell_w), round(y0 + row * cell_h)
+        return None
+
+    def play(self):
+        """Draw one desktop selection, optionally moving its endpoint repeatedly."""
+        min_side = math.ceil(min(pyautogui.size()) / 8)
+
+        def center_axis(low, high, rng):
+            """Flat maximum in the central half; linear falloff to zero at edges."""
+            while True:
+                fraction = rng.random()
+                if rng.random() < min(1.0, 4 * fraction, 4 * (1 - fraction)):
+                    return round(low + fraction * (high - low))
+
+        def clear_rectangle(points, bounds, obstacles):
+            left = min(point[0] for point in points)
+            right = max(point[0] for point in points)
+            top = min(point[1] for point in points)
+            bottom = max(point[1] for point in points)
+            if not (bounds[0] <= left <= right <= bounds[2]
+                    and bounds[1] <= top <= bottom <= bounds[3]):
+                return False
+            return all(right < x1 or left > x2 or bottom < y1 or top > y2
+                       for x1, y1, x2, y2 in obstacles)
+
+        def continuation_probability(completed):
+            """After endpoints 1..10, continuation falls linearly from 0.8 to 0."""
+            return max(0.0, 0.8 * (10 - completed) / 9)
+
+        def sample_endpoint(start, bounds, obstacles, rng, previous=None):
+            # Keeping the same quadrant ensures intermediate aspect ratios are also
+            # within the limits during a straight move between two endpoints.
+            for _ in range(200):
+                if previous is None:
+                    sx, sy = rng.choice((-1, 1)), rng.choice((-1, 1))
+                else:
+                    sx = 1 if previous[0] > start[0] else -1
+                    sy = 1 if previous[1] > start[1] else -1
+                max_width = bounds[2] - \
+                    start[0] if sx > 0 else start[0] - bounds[0]
+                max_height = bounds[3] - \
+                    start[1] if sy > 0 else start[1] - bounds[1]
+                # Favor near-square shapes, but keep at least a 1.05 aspect ratio.
+                # Preserve the long axis between endpoints to avoid crossing a square.
+                wide = (rng.choice((False, True)) if previous is None else
+                        abs(previous[0] - start[0]) > abs(previous[1] - start[1]))
+                aspect = math.exp(rng.triangular(
+                    math.log(1.05), math.log(5), math.log(1.05)))
+                ratio = aspect if wide else 1 / aspect
+                low = max(min_side, min_side / ratio)
+                high = min(max_height, max_width / ratio)
+                if high < low:
+                    continue
+                height = round(rng.uniform(low, high))
+                width = round(height * ratio)
+                if not (min(width, height) >= min_side and max(width, height) <= 5 * min(width, height)):
+                    continue
+                if 20 * max(width, height) < 21 * min(width, height):
+                    continue
+                end = start[0] + sx * width, start[1] + sy * height
+                if previous is not None and math.dist(end, previous) < 12:
+                    continue
+                # This envelope contains every selection rectangle swept by the move.
+                points = (start, end) if previous is None else (
+                    start, previous, end)
+                if clear_rectangle(points, bounds, obstacles):
+                    return end
+            return None
+
+        def sample_selection(bounds, obstacles, rng):
+            if bounds[2] - bounds[0] < min_side or bounds[3] - bounds[1] < min_side:
+                return None
+            for _ in range(200):
+                start = (center_axis(bounds[0], bounds[2], rng),
+                         center_axis(bounds[1], bounds[3], rng))
+                if not clear_rectangle((start,), bounds, obstacles):
+                    continue
+                end = sample_endpoint(start, bounds, obstacles, rng)
+                if end is not None:
+                    return start, end
+            return None
+
+        if not self.is_on_desktop():
+            pyautogui.hotkey("win", "d")
+            self.timing.delay()
+        self.wait_until(self.is_on_desktop, "desktop to receive focus")
+        self.fetch_desktop()
+        bounds = self.desktop_work_area()
+        obstacles = [(left - 8, top - 8, right + 8, bottom + 8)
+                     for left, top, right, bottom in self.desktop_item_bounds]
+        selection = sample_selection(bounds, obstacles, self.rng)
+        if selection is None:
+            return False
+        start, end = selection
+        continuous = self.rng.choices((False, True), weights=(2, 3), k=1)[0]
+        self.timing.delay()
+        self.curve_move(*start, smooth=True,
+                        speed_scale=self.rng.uniform(0.7, 0.8))
+        if not self.is_on_desktop():
+            return False
+        try:
+            pyautogui.mouseDown(button="left")
+            for completed in range(1, 11):
+                if not self.is_on_desktop():
+                    return False
+
+                def safe_path(points):
+                    if not clear_rectangle((start, *points), bounds, obstacles):
+                        return False
+                    for px, py in points:
+                        w, h = abs(px - start[0]), abs(py - start[1])
+                        # The first drag necessarily grows from zero size.
+                        if completed > 1 and min(w, h) < min_side:
+                            return False
+                        if min(w, h) >= min_side and 20 * max(w, h) < 21 * min(w, h):
+                            return False
+                        if min(w, h) >= 8 and max(w, h) > 5 * min(w, h):
+                            return False
+                    return True
+
+                if self.curve_move(*end, correction=False, path_validator=safe_path,
+                                   smooth=True, speed_scale=self.rng.uniform(0.7, 0.8)) is False:
+                    return False
+                self.timing.play_pause()
+                if not continuous or self.rng.random() >= continuation_probability(completed):
+                    break
+                next_end = sample_endpoint(
+                    start, bounds, obstacles, self.rng, previous=end)
+                if next_end is None:
+                    break
+                self.timing.delay()
+                end = next_end
+        finally:
+            # Release even when an exception or the corner fail-safe interrupts.
+            original_failsafe = pyautogui.FAILSAFE
+            try:
+                pyautogui.FAILSAFE = False
+                pyautogui.mouseUp(button="left")
+            finally:
+                pyautogui.FAILSAFE = original_failsafe
+        return True
 
     def get_coords_desktop(self, element_id):
         left, top, right, bottom = self.desktop_icons[element_id]
@@ -82,24 +326,15 @@ class UI:
 
         return x, y
 
-    def curve_move(self, x, y, correction=True):
+    def curve_move(self, x, y, correction=True, path_validator=None, *,
+                   smooth=False, speed_scale=1.0):
         """Move toward the supplied screen coordinates without clicking."""
         if x is None or y is None:
             raise ValueError("curve_move requires both x and y coordinates")
+        if not math.isfinite(speed_scale) or speed_scale <= 0:
+            raise ValueError("speed_scale must be positive and finite")
 
         screen_width, screen_height = pyautogui.size()
-
-        def curve_step_delay(self, progress):
-            """Pause briefly between curve points, with slower endpoints."""
-            if not 0 < progress <= 1:
-                raise ValueError("progress must be in (0, 1]")
-
-            speed = 0.45 + 0.55 * math.sin(math.pi * progress)
-            time.sleep(random.uniform(0.004, 0.008) / speed)
-
-        def correction_pause(self):
-            """Pause briefly before correcting an intentionally inaccurate move."""
-            time.sleep(random.uniform(0.1, 0.3))
 
         def clamp(point_x, point_y):
             return (
@@ -121,6 +356,11 @@ class UI:
                 (start[1] + end[1]) / 2 + normal_y * bend,
             )
             steps = max(12, min(30, round(distance / 25)))
+            if smooth:
+                steps *= 2
+            parameters = [index / steps for index in range(1, steps + 1)]
+            if smooth:
+                parameters = [t * t * (3 - 2 * t) for t in parameters]
             return [
                 (
                     (1 - t) ** 2 * start[0]
@@ -130,7 +370,7 @@ class UI:
                     + 2 * (1 - t) * t * control[1]
                     + t ** 2 * end[1],
                 )
-                for t in (index / steps for index in range(1, steps + 1))
+                for t in parameters
             ]
 
         def move_points(points):
@@ -144,14 +384,30 @@ class UI:
                     progress = index / point_count
                     point_x, point_y = clamp(round(point[0]), round(point[1]))
                     pyautogui.moveTo(point_x, point_y, duration=0)
-                    self.timing.curve_step_delay(progress)
+                    # Offset denser sampling, then apply the requested speed scale.
+                    self.timing.curve_step_delay(
+                        progress, duration_scale=1 / ((2 if smooth else 1) * speed_scale))
             finally:
                 pyautogui.PAUSE = original_pause
 
         current = pyautogui.position()
         start = (current.x, current.y)
 
+        if path_validator is not None:
+            target = clamp(x, y)
+            # Validate the exact rounded path before pressing ahead. Reduce bend
+            # near obstacles; the final fallback retains the same movement timing.
+            for attempt in range(17):
+                bend = self.rng.uniform(0.015, 0.055) if attempt < 16 else 0
+                points = [clamp(round(px), round(py))
+                          for px, py in curve_points(start, target, bend)]
+                if path_validator([start, *points]):
+                    move_points(points)
+                    return True
+            return False
+
         if math.hypot(x - start[0], y - start[1]) < 3:
+            pyautogui.moveTo(*clamp(x, y))
             return
 
         if not correction:
@@ -198,7 +454,7 @@ class UI:
         elif button == "drag":
             pyautogui.mouseDown(button="left")
             try:
-                pyautogui.moveTo(end_x, end_y, duration=0.3)
+                self.curve_move(end_x, end_y, correction=False)
             finally:
                 pyautogui.mouseUp(button="left")
         elif button == "scroll":
@@ -257,7 +513,7 @@ class UI:
 
         return text.strip()
 
-    def typo(self, char, next_char=None):
+    def typo(self, char, next_char=None, *, address_bar=False):
         letters = "abcdefghijklmnopqrstuvwxyz"
 
         if char.lower() not in letters or len(char) != 1:
@@ -313,14 +569,21 @@ class UI:
 
         self.timing.delay()
 
-        if mode == "repeat":
+        def erase_character():
+            if address_bar:
+                # Inline completion is selected after the typed prefix. Delete
+                # clears that suffix (or does nothing at the end) before Backspace.
+                pyautogui.press("delete")
             pyautogui.press("backspace")
+
+        if mode == "repeat":
+            erase_character()
             self.timing.delay()
 
             return len(correct)
 
         for _ in wrong:
-            pyautogui.press("backspace")
+            erase_character()
             self.timing.delay()
 
         for typed_char in correct:
@@ -329,7 +592,7 @@ class UI:
 
         return len(correct)
 
-    def type_from_corpus(self, category="search", typo_rate=0.1):
+    def type_from_corpus(self, category="search", typo_rate=0.1, *, address_bar=False):
         text = self.choose_text(category, rng=self.rng)
 
         self.type_text("")
@@ -348,7 +611,7 @@ class UI:
                     else None
                 )
 
-                consumed = self.typo(char, next_char)
+                consumed = self.typo(char, next_char, address_bar=address_bar)
                 index += consumed
 
             else:
@@ -356,6 +619,9 @@ class UI:
                 pyautogui.write(char)
                 index += 1
 
+        if address_bar:
+            # Submit the intended text, without an appended inline suggestion.
+            pyautogui.press("delete")
         return text
 
     def random_scroll(self, x, y, direction=None):
@@ -575,12 +841,7 @@ class UI:
             self.timing.pause()
         self.wait_until(self.is_on_desktop, "desktop to receive focus")
         self.wait_until(lambda: self.fetch_desktop() or True, "desktop icons")
-        width, height = pyautogui.size()
-        point = next(((round(width * x), round(height * y))
-                      for x in (0.7, 0.8, 0.6, 0.9) for y in (0.55, 0.45, 0.65)
-                      if all(not (left - 70 <= width * x <= right + 70 and
-                                  top - 45 <= height * y <= bottom + 45)
-                             for left, top, right, bottom in self.desktop_icons.values())), None)
+        point = self.desktop_creation_point()
         if point is None:
             raise RuntimeError("No clear desktop area for a new text document")
         previous = set(desktop.iterdir())
@@ -623,6 +884,7 @@ class UI:
             return None
 
     def save_new_document(self, path):
+        self.timing.pause()
         process_id = self.foreground_window().process_id()
         pyautogui.hotkey("ctrl", "shift", "s")
         dialog = self.wait_until(
@@ -632,15 +894,27 @@ class UI:
                      and window.window_text().strip().casefold() in ("save as", "另存为") else None),
             "Notepad Save As dialog")
         dialog.set_focus()
-        # Standard Windows Save As filename edit; quoted paths preserve .py.
+        self.timing.pause()
+        # Navigate using the portable shell folder name, even when the user's
+        # desktop path contains characters PyAutoGUI cannot type (e.g. Chinese).
+        pyautogui.hotkey("alt", "d")
+        self.type_text("shell:Desktop")
+        pyautogui.press("enter")
+        self.timing.pause()
+        # Type the filename visibly; quotes prevent Notepad appending .txt.
         filename = Desktop(backend="win32").window(handle=dialog.handle).child_window(
             class_name="Edit", control_id=1001).wrapper_object()
         filename.set_focus()
-        filename.set_edit_text('"' + str(path) + '"')
+        pyautogui.hotkey("ctrl", "a")
+        self.type_text('"' + path.name + '"')
+        self.wait_until(lambda: filename.window_text() == '"' + path.name + '"',
+                        "typed Save As filename")
+        self.timing.pause()
         pyautogui.press("enter")
         self.wait_until(path.is_file, f"new desktop file {path.name}")
         self.wait_until(lambda: self.foreground_window().handle !=
                         dialog.handle, "Save As to close")
+        self.timing.pause()
 
     def prepare_document_keyboard(self, editor):
         """Select an installed English layout before calling the original typing API."""
@@ -664,9 +938,11 @@ class UI:
 
     def write_desktop_document(self, stem, suffix=".txt", count=1, text=None):
         """Create a desktop TXT, double-click it, write through existing typing APIs."""
+        self.last_created_text_path = None
         path = self.new_text_document()
         if path is None:
             return None
+        self.last_created_text_path = path
 
         def document_icon():
             self.fetch_desktop()
@@ -691,7 +967,10 @@ class UI:
             else:
                 self.type_text(text)
                 lines.append(text)
+        self.timing.pause()
+        editor.set_focus()
         pyautogui.hotkey("ctrl", "s")
+        self.timing.pause()
         expected = "\n".join(lines)
 
         def saved():
@@ -712,8 +991,24 @@ class UI:
             path = target
             self.wait_until(saved, f"saved script in {path.name}")
             editor.set_focus()
+        # Explicitly save the current document again before closing its tab.
+        # For Hello World this is the PY; the original TXT was saved above.
+        self.timing.pause()
+        pyautogui.hotkey("ctrl", "s")
+        self.timing.pause()
+        self.wait_until(saved, f"final saved contents of {path.name}")
         self.timing.pause()
         pyautogui.hotkey("ctrl", "w")
+
+        def document_closed():
+            window = self.foreground_window()
+            if window.process_id() == editor.process_id() and window.class_name() == "#32770":
+                return False  # Never proceed to desktop dragging over a save prompt.
+            return (window.class_name() != "Notepad" or
+                    not any(window.window_text().startswith(name + " - ")
+                            for name in (path.name, path.stem)))
+
+        self.wait_until(document_closed, f"Notepad tab {path.name} to close")
         return path
 
     def write_sentences(self):
@@ -722,5 +1017,61 @@ class UI:
         return self.write_desktop_document("notes", count=count)
 
     def write_hello_world(self):
-        # Write a script directly; do not rename an extension or execute it.
-        return self.write_desktop_document("helloworld", ".py", text='print("Hello, world!")')
+        return self.write_desktop_document(
+            "helloworld", ".py", text='print("Hello, world!")')
+
+    def organize_desktop_file(self, path):
+        """Drag the just-created TXT to the first free slot, left column first."""
+        if path is None or not Path(path).is_file():
+            return False
+        path = Path(path)
+        if not self.is_on_desktop():
+            pyautogui.hotkey("win", "d")
+            self.timing.pause()
+        self.wait_until(self.is_on_desktop, "desktop before organizing the TXT")
+
+        def find_icon():
+            self.fetch_desktop()
+            return next((name for name in (path.name, path.stem)
+                         if name in self.desktop_icons), None)
+
+        name = self.wait_until(find_icon, f"desktop icon {path.name}")
+        target = self.desktop_creation_point(ordered=True, exclude_name=name)
+        if target is None:
+            print(f"No free desktop slot for {path.name}")
+            return False
+        left, top, right, bottom = self.desktop_icons[name]
+        source = (round((left + right) / 2), round((top + bottom) / 2))
+        if math.dist(source, target) < 12:
+            return True
+        # Select only this file before dragging, avoiding moving a group selection.
+        self.move_and_click(*source)
+        self.timing.pause()
+        if not self.is_on_desktop():
+            return False
+        try:
+            pyautogui.mouseDown(button="left")
+            self.timing.delay()
+            self.curve_move(*target, correction=False, smooth=True,
+                            speed_scale=self.rng.uniform(0.7, 0.8))
+            self.timing.delay()
+        finally:
+            original_failsafe = pyautogui.FAILSAFE
+            try:
+                pyautogui.FAILSAFE = False
+                pyautogui.mouseUp(button="left")
+            finally:
+                pyautogui.FAILSAFE = original_failsafe
+        self.timing.pause()
+
+        def positioned():
+            current_name = find_icon()
+            if not current_name:
+                return False
+            l, t, r, b = self.desktop_icons[current_name]
+            # Explorer may snap the drop to its configured icon grid.
+            return (abs((l + r) / 2 - target[0]) <= max(r - l, 48)
+                    and abs((t + b) / 2 - target[1]) <= max(b - t, 48))
+
+        self.wait_until(positioned, f"{path.name} to occupy the left-side slot")
+        return True

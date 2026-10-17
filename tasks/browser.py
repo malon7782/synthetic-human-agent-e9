@@ -30,7 +30,7 @@ class BrowserTask:
             return False
 
         pyautogui.hotkey('ctrl', 'l')
-        self.ui.type_from_corpus("search")
+        self.ui.type_from_corpus("search", address_bar=True)
         self.timing.delay()
         self.timing.delay()
 
